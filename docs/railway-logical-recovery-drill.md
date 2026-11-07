@@ -66,3 +66,64 @@ Synthetic-only staging integration remains NO-GO pending successful recovery.
 Independent encrypted off-platform recovery remains mandatory before real-user
 onboarding or sensitive production records. Native snapshots were not restored
 or certified by this attempt.
+
+## Authorized corrected preflight — November 7, 2026, 21:01–21:02 UTC
+
+The single authorized corrected SQL attempt succeeded. Confirmed exact database
+`supa_staging`, cluster `7704432314739101731`, PostgreSQL 18.6, TLS 1.3 with
+verify-full CA/hostname verification, recovery=false, read-only transaction and
+13 successful migration records. This count is not a fresh migration checksum
+comparison or a synthetic-data inventory; those remain pending.
+
+The mandatory minimum-export-permissions check failed:
+
+| Existing login | Tables readable | Tables with write privileges | Other authority |
+| --- | ---: | ---: | --- |
+| supa_staging_admin | 50/50 | 50/50 | Superuser, role/database creation, replication, BYPASSRLS |
+| supa_staging_migration | 50/50 | 50/50 | Owns 139 user relations; can modify migrated objects |
+| supa_staging_runtime | 39/50 | 2/50 | No elevated flags, memberships or owned user relations |
+
+No existing least-privilege complete export role was found. The runtime cannot
+produce the complete required backup; filtering the other 11 tables is forbidden.
+Admin or migration authority must not substitute silently. Read-only session
+settings do not remove a role's underlying capabilities. Stopped immediately on
+this failed mandatory check: no new synthetic-data queries, export, restore,
+provisioning or automatic retry. No partial backup or size/hash claim exists.
+
+Read-only control-plane checks again confirmed expected project/environment/
+service identities and unchanged deployment IDs for PostgreSQL, API and frontend,
+all SUCCESS. Three non-expired native backup entries remain available; source
+backup contents were not restored or certified. Current usage remains reported
+as $22.124508/$60, isOverLimit=false. Existing execution restrictions, private API/
+PostgreSQL networking and frontend origin/configuration were observed unchanged.
+No SQL mutations, source restart or role/credential changes were performed.
+
+Recovery environment, temporary credentials, backup and restore: not created.
+No temporary compute/storage was allocated, so no recovery-resource charges or
+cleanup apply. Read-only control-plane/SSH traffic has no separate measured
+invoice; do not claim an exact total incremental charge. No restore, migration/
+schema/ACL comparison, restart persistence or full source-content fingerprint was
+performed. The source remains unchanged by drill actions; physical/statistical
+activity caused by normal connections is not claimed byte-identical.
+
+### Minimum next authorization
+
+Approve creation and later removal of one uniquely named, temporary, **NOLOGIN**
+export role only inside `supa_staging`, with USAGE on the reviewed user schemas
+and SELECT on the complete reviewed table/sequence inventory. No writes, object
+ownership, CREATE, elevated attributes, default privileges or broad cluster-wide
+`pg_read_all_data` membership. Do not widen the existing runtime or migration
+roles or rotate credentials. An existing privately authenticated admin transport
+can select that effective role using pg_dump's role option; verify effective
+current_user, read-only access and write/DDL denials before the single export.
+The administrative login remains privileged; this approach constrains the export
+operation's effective role and does not describe the login as least-privileged.
+No role is created or granted by this document. Review exact identifiers, ACLs,
+RLS policies and inventory first, including any table-owner-only export issue;
+stop rather than bypass RLS or omit tables.
+
+Then authorize resuming the remaining preflight and previously scoped single
+logical recovery drill, preserving the 16 MiB complete-bundle bound and cleanup
+limited to newly recorded IDs and this temporary role. Synthetic-only integration
+remains NO-GO pending successful recovery. Independent encrypted off-platform
+recovery remains required before real users or sensitive production records.
