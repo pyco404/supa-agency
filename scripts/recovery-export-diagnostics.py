@@ -43,6 +43,11 @@ PATTERNS = {
 }
 
 
+def timeout_argv():
+    """Same 90-second TERM deadline on GNU coreutils and Railway BusyBox."""
+    return ['timeout', '-s', 'TERM', '90']
+
+
 def diagnose(text, operation, exit_status):
     if operation not in {'pg_dump', 'pg_restore_list', 'pg_restore_readback', 'ssh_transport'}:
         raise ValueError('unreviewed_operation')
