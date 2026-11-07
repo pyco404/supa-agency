@@ -139,3 +139,72 @@ private keys, passwords or password verifiers are retained there. Independent
 encrypted off-platform recovery remains mandatory before real-user onboarding or
 sensitive production records. Native Railway snapshots were neither restored nor
 certified by this logical-drill attempt.
+
+## Instrumented attempt — confirmed timeout launcher incompatibility
+
+The owner subsequently authorized exactly one instrumented staging-only export
+attempt, with no restore or recovery provisioning. Read-only preflight again
+passed: exact source identity, 18.6 client/server, full TLS 1.3 verification,
+original migration checksums and runtime grants, canonical synthetic fixture,
+50 tables/six sequences, three non-expired native backups and prior cleanup.
+Observed workspace usage: $22.170161662042656/$60, not over limit. No service or
+execution configuration changed.
+
+Instrumented attempt: November 7, 2026, 21:50 UTC. Temporary identities were
+`supa_recovery_export_535434b69d32` and `supa_recovery_login_535434b69d32` with the
+same reviewed minimum grants, expiration, connection limit and defaults. Eight
+live expected permission denials passed, as did effective table/sequence read
+checks and shared-snapshot inventory reads. The dump launcher exited 1 and
+reported `option_rejected`; **pg_dump itself was never launched**.
+
+The root cause is now confirmed: Railway's exec environment resolves `timeout`
+to BusyBox, whose parser rejects the GNU-only `--signal=TERM` option. The
+controller called `timeout --signal=TERM 90s pg_dump ...`. A harmless read-only
+process diagnostic, `timeout --signal=TERM 90s true`, reproduced the exact same
+291-byte diagnostic fingerprint:
+`b84cd5feee719240346bd6ba93382ee64cfb91fa35a81fbb54e151abac1fd8ea`.
+This is an **error diagnostic hash, not a backup checksum**. No SQL, credentials,
+paths or data from the client error were retained. The previous attempt used the
+same incompatible launcher; its original raw diagnostic was not retained.
+No connection-limit error was found in the historical categories inspected;
+the reviewed connection limit was not increased.
+
+Minimum correction: `timeout -s TERM 90 pg_dump ...`. Harmless `true`/`sleep`
+probes inside the same live exec environment verified short-option success (0)
+and actual deadline termination (143). The equivalent GNU launcher tests passed
+locally (success 0, deadline 124). Both nonzero timeout results remain failures;
+no timeout, read-only snapshot, permission or size requirement was relaxed.
+The fixed prefix is centralized in `recovery-export-diagnostics.py` and used by
+the private controller; the former controller is preserved as failure evidence.
+The prepared corrected controller SHA-256 is
+`e157540659553b9c283652e1b65f582a230f96597fb009f2720d99a973268dc8`.
+Its used intent still blocks accidental rerun. No corrected live export occurred.
+
+Diagnostics now capture the child operation/status and both output channels in
+memory, then emit only allowlisted categories, byte counts and fingerprints.
+Protocol parsing rejects arbitrary category/stage strings, URLs, paths and secret
+values. Six deterministic tests passed. The actual generated controller passed
+three socket-only disposable PG18.3 integration fixtures: successful dump/shared
+snapshot/TOC/readback/bundle, denied export, and timeout. Failure cases verified
+role and partial-file cleanup and absence of private fixture strings in output.
+Local PG18.3 testing does not claim a successful live PG18.6 export or restore.
+The prepared successful path also requires 50 TABLE DATA and six SEQUENCE SET
+entries, full archive decompression to /dev/null, embedded-dump SHA-256 agreement,
+and the complete 16,777,216-byte bundle cap before acceptance.
+
+Independent post-attempt verified-TLS queries confirmed zero temporary roles and
+sessions, and the uniquely created source directory is absent. Pre/post identity,
+history, table/sequence inventory, owners, original roles, database/schema ACL
+metadata, function definitions/ACLs, runtime grants, fixture checks and all table
+counts/health summaries match. Normal API heartbeats were not frozen. No existing
+service was restarted, no credentials rotated and no financial rows changed.
+
+Result: one failed instrumented launcher attempt, zero pg_dump executions in that
+attempt, zero retries, no complete backup/checksum/accepted size, no restore,
+and no recovery resources or instance charges. The source remains healthy; the
+synthetic-only recovery gate remains NO-GO pending actual export and restore.
+Next approval is one corrected export attempt with the same temporary identities,
+90-second deadline and 16 MiB cap. If successful, verify/retain the private archive
+and stop for separate isolated-restore approval. Do not reuse the spent intent or
+automatically retry. Independent encrypted off-platform recovery remains required
+before real-user onboarding or sensitive production records.
