@@ -91,6 +91,29 @@ class RuntimeContract(unittest.TestCase):
         self.assertNotIn('RUN ', self.runtime)
         self.assertIn('ENTRYPOINT ["/usr/local/bin/supa-api"]', self.runtime)
 
+    def normalize_download(self, names, succeeds):
+        # Run the real reviewed shell fragment, including its exact glob/count guard.
+        command = 'set -- ' + self.overlay.split('&& set -- ', 1)[1].split('&& echo ', 1)[0]
+        command = command.replace('\\\n', ' ')
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in names: (root / name).write_bytes(b'synthetic package bytes')
+            result = subprocess.run(['/bin/sh', '-eu', '-c', command], cwd=root,
+                                    capture_output=True, timeout=5)
+            self.assertEqual(result.returncode == 0, succeeds)
+            if succeeds: self.assertEqual((root / 'zlib1g.deb').read_bytes(), b'synthetic package bytes')
+            else: self.assertFalse((root / 'zlib1g.deb').exists())
+
+    def test_real_normalization_handles_epoch_filename(self):
+        self.normalize_download(['zlib1g_1%3a1.3.dfsg+really1.3.1-1+deb13u1_amd64.deb'], True)
+
+    def test_real_normalization_also_handles_no_epoch_filename(self):
+        self.normalize_download(['zlib1g_1.3.dfsg+really1.3.1-1+deb13u1_amd64.deb'], True)
+
+    def test_real_normalization_rejects_missing_and_ambiguous_downloads(self):
+        self.normalize_download([], False)
+        self.normalize_download(['zlib1g_one_amd64.deb', 'zlib1g_two_amd64.deb'], False)
+
     def test_changed_package_rejected_before_extraction(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'changed.deb'
