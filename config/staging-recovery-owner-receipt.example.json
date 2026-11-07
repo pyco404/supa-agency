@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "status": "PENDING_NOT_VERIFIED",
+  "preparation_application_head": "1b27a2e95b695bfe767a8def827450f40bce1f91",
+  "scope": "supa_staging recovery only; protected primary excluded",
+  "owner_confirmed_setup_pending": true,
+  "destination": {
+    "provider": "backblaze_b2",
+    "account_owner_confirmed": false,
+    "region": null,
+    "bucket_name": null,
+    "bucket_id": null,
+    "endpoint": null,
+    "private_bucket_verified": false,
+    "prefix": "supa-staging/snapshots/",
+    "retention_proposed": {"mode": "governance", "days": 30},
+    "retention_owner_approved": false,
+    "retained_versions_verified": false,
+    "anonymous_access_denied": false
+  },
+  "key_permission_proposals": {
+    "api": "B2 Native API v4; permission proposals only",
+    "writer": {"keyName": "supa-staging-backup-writer", "capabilities": ["writeFiles"], "bucketIds": null, "namePrefix": "supa-staging/snapshots/", "validDurationInSeconds": 86400},
+    "reader": {"keyName": "supa-staging-recovery-reader", "capabilities": ["listFiles", "readFiles"], "bucketIds": null, "namePrefix": "supa-staging/snapshots/", "validDurationInSeconds": 86400},
+    "keys_created_or_installed": false,
+    "permission_denial_tests_passed": false,
+    "writer_includes_hide_file_capability": true,
+    "strict_append_only_claim": false
+  },
+  "independent_workstation": {
+    "owner_control_confirmed": false,
+    "non_secret_label": null,
+    "separate_from_development_host": false,
+    "encrypted_working_storage_confirmed": false,
+    "postgres18_version": null,
+    "gnupg_version": null,
+    "two_separate_recovery_media_confirmed": false
+  },
+  "public_certificate_review": {
+    "recipient_primary_fingerprint": null,
+    "recipient_subkey_fingerprint": null,
+    "recipient_certificate_sha256": null,
+    "signer_primary_fingerprint": null,
+    "signer_subkey_fingerprint": null,
+    "signer_certificate_sha256": null,
+    "public_certificate_local_paths": null,
+    "reviewer_non_secret_label": null,
+    "independent_channel_confirmed": false,
+    "capabilities_expiry_revocation_checked": false,
+    "reviewed_at_utc": null,
+    "detached_review_signature_path": null
+  },
+  "snapshot_size": {
+    "complete_bundle_limit_bytes": 16777216,
+    "actual_staging_bundle_bytes": null,
+    "fits_limit_verified": false,
+    "streaming_required": null
+  },
+  "live_export_authorized": false,
+  "live_transfer_authorized": false,
+  "real_snapshot_restore_verified": false
+}
