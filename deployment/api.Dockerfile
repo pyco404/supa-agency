@@ -22,11 +22,15 @@ RUN cargo build --release --locked -p supa-api --bin supa-api --bin supa-staging
 FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS zlib-security
 RUN test "$(dpkg --print-architecture)" = amd64 \
     && apt-get update \
-    && cd /tmp \
+    && mkdir /tmp/zlib-security \
+    && cd /tmp/zlib-security \
     && apt-get download zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
-    && echo '8c27c342230503b73dfde629642c3b352e87b554e06d60cf58772f236a305ceb  zlib1g_1.3.dfsg+really1.3.1-1+deb13u1_amd64.deb' | sha256sum --check --strict \
-    && dpkg-deb --extract zlib1g_1.3.dfsg+really1.3.1-1+deb13u1_amd64.deb /overlay \
-    && dpkg-deb --control zlib1g_1.3.dfsg+really1.3.1-1+deb13u1_amd64.deb /control \
+    && set -- zlib1g_*_amd64.deb \
+    && test "$#" -eq 1 \
+    && mv -- "$1" zlib1g.deb \
+    && echo '8c27c342230503b73dfde629642c3b352e87b554e06d60cf58772f236a305ceb  zlib1g.deb' | sha256sum --check --strict \
+    && dpkg-deb --extract zlib1g.deb /overlay \
+    && dpkg-deb --control zlib1g.deb /control \
     && mkdir -p /overlay/var/lib/dpkg/status.d \
     && cp /control/control /overlay/var/lib/dpkg/status.d/zlib1g \
     && cp /control/md5sums /overlay/var/lib/dpkg/status.d/zlib1g.md5sums
