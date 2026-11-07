@@ -3,6 +3,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import unittest
 
 s = importlib.util.spec_from_file_location('diagnostics', Path(__file__).with_name('recovery-export-diagnostics.py'))
@@ -11,6 +12,16 @@ s.loader.exec_module(m)
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_portable_launcher_success_and_deadline(self):
+        # Run harmless owned processes through the actual launcher; no database.
+        prefix = m.timeout_argv()
+        self.assertEqual(prefix[-1], '90')
+        short = prefix[:-1] + ['1']
+        done = subprocess.run(short + ['true'], capture_output=True, timeout=5)
+        self.assertEqual(done.returncode, 0)
+        expired = subprocess.run(short + ['sleep', '2'], capture_output=True, timeout=5)
+        self.assertIn(expired.returncode, (124, 143))
+
     def test_client_errors_from_either_transport_channel(self):
         for channel in ['stdout', 'stderr']:
             data = {channel: 'DUMP_EXIT_CODE=1\nDUMP_CATEGORY=permission_denied\nFINAL_STAGE=single_export\n'}
