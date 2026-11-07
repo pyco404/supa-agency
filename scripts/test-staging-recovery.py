@@ -232,15 +232,26 @@ def main():
                   'external_requests': 0, 'live_database_exported': False, 'production_keys_created': False,
                   'actual_independent_storage_tested': False, 'railway_recovery_verified': False,
                   'limitation': 'Two local disposable clusters and synthetic keys; no independent machine, storage or actual Railway backup was tested.'}
-        out = ROOT / 'artifacts/staging-recovery-preparation'; out.mkdir(mode=0o700, exist_ok=True)
-        (out / 'synthetic-result.json').write_text(json.dumps(result, indent=2)+'\n')
-        print(json.dumps(result))
     finally:
-        for c in reversed(clusters): stop(c)
+        cleanup_errors = []
+        for c in reversed(clusters):
+            try: stop(c)
+            except Exception: cleanup_errors.append('owned_cluster_stop_failed')
         fixtures.doClassCleanups()
+        if fixtures.tearDown_exceptions:
+            cleanup_errors.append('fixture_key_cleanup_failed')
+        if cleanup_errors:
+            raise RuntimeError('synthetic_cleanup_incomplete_no_success_receipt')
         assert before == json.loads(subprocess.check_output(['pg_lsclusters','--json']))
         assert all(not (c['data']/'postmaster.pid').exists() for c in clusters)
         shutil.rmtree(work); shutil.rmtree(ram)
+    # Success is retained only after owned processes/keys are cleaned up.
+    result['checks']['owned_clusters_stopped_and_fixture_keys_removed'] = True
+    result['checks']['registered_clusters_unchanged'] = True
+    out = ROOT / 'artifacts/staging-recovery-preparation'; out.mkdir(mode=0o700, exist_ok=True)
+    (out / 'synthetic-result.json').write_text(json.dumps(result, indent=2)+'\n')
+    print(json.dumps(result))
+
 
 
 if __name__ == '__main__':
