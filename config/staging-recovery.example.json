@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "status": "design_only_no_production_operations_authorized",
+  "scope": "new Railway supa_staging database only; protected primary excluded",
+  "destination": {
+    "provider_recommendation": "backblaze_b2",
+    "account_owner_verified": false,
+    "bucket_name": null,
+    "bucket_id": null,
+    "endpoint": null,
+    "region": null,
+    "private_access_verified": false,
+    "outside_railway_project": true,
+    "snapshot_prefix_template": "supa-staging/snapshots/<random-uuid>/",
+    "immutable_object_retention_days_proposed": 30,
+    "retention_mode_proposed": "governance",
+    "automatic_deletion": false,
+    "writer_capabilities_proposed": ["writeFiles"],
+    "recovery_reader_capabilities_proposed": ["listFiles", "readFiles"],
+    "writer_delete_or_retention_bypass_allowed": false,
+    "object_listing_readback_and_permission_denials_verified": false,
+    "credentials_installed": false
+  },
+  "key_custody": {
+    "profile": "gnupg-openpgp-aes256-ocb-v1",
+    "approved_recipient_primary": null,
+    "approved_recipient_subkey": null,
+    "approved_manifest_signer_primary": null,
+    "approved_manifest_signer_key": null,
+    "public_certificates_review_receipt": null,
+    "independent_reviewer_confirmed": false,
+    "separate_recovery_workstation_confirmed": false,
+    "two_separate_encrypted_recovery_media_confirmed": false,
+    "production_private_keys_allowed_in_repository_or_railway": false,
+    "signing_location": "owner-controlled private signing station; never CI or Railway",
+    "revocation_and_expiry_policy_approved": false
+  },
+  "outer_manifest_template": {
+    "version": 1,
+    "snapshot_id": null,
+    "created_at": null,
+    "filename": null,
+    "bytes": null,
+    "sha256": null,
+    "profile": "gnupg-openpgp-aes256-ocb-v1",
+    "recipient_primary": null,
+    "recipient_subkey": null,
+    "signer_primary": null,
+    "signer_key": null
+  },
+  "recovery_target": {
+    "production_target_allowed": false,
+    "destination_workstation_and_device": null,
+    "postgres_major": 18,
+    "source_server_minor_compatibility_verified": false,
+    "socket_only": true,
+    "empty_cluster_required": true,
+    "live_credentials_allowed": false,
+    "egress_blocked": true,
+    "new_target_identity_required": true
+  },
+  "limits": {
+    "prepared_crypto_plaintext_max_bytes": 16777216,
+    "streaming_production_orchestration_implemented": false,
+    "proposed_monthly_storage_alert_usd": 1,
+    "provider_hard_spending_cap_verified": false
+  },
+  "production_permissions": {
+    "provision_storage": false,
+    "create_or_install_credentials": false,
+    "generate_or_enroll_production_keys": false,
+    "export_live_database": false,
+    "upload_live_ciphertext": false,
+    "download_decrypt_restore_live_snapshot": false,
+    "railway_database_recovery_proven": false
+  }
+}
