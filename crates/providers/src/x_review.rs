@@ -10,6 +10,13 @@ use zeroize::Zeroizing;
 pub const IDENTITY_ENDPOINT: &str = "https://api.x.com/2/users/me";
 pub const POST_ENDPOINT: &str = "https://api.x.com/2/tweets";
 pub const SCOPES: &[&str] = &["tweet.read", "tweet.write", "users.read"];
+pub fn text_sha256(text: &str) -> String {
+    ring::digest::digest(&ring::digest::SHA256, text.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MockAccount {
@@ -101,11 +108,7 @@ impl<T: MockXTransport> MockXAdapter<T> {
         if self.attempted.swap(true, Ordering::SeqCst) {
             return XReceipt::outcome("failed", "attempt_already_consumed");
         }
-        let hash = ring::digest::digest(&ring::digest::SHA256, text.as_bytes())
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
+        let hash = self::text_sha256(text);
         if safe_post(text).is_err() || hash != text_sha256 || now_unix >= self.expires_unix {
             return XReceipt::outcome("failed", "invalid_text_or_expired_authorization");
         }
@@ -120,7 +123,10 @@ impl<T: MockXTransport> MockXAdapter<T> {
             _ => return XReceipt::outcome("failed", "identity_unavailable"),
         };
         if identity.status != 200 || identity.body.len() > 16384 {
-            return XReceipt::outcome("failed", "identity_unavailable");
+            let mut receipt = XReceipt::outcome("failed", "identity_unavailable");
+            receipt.http_status = Some(identity.status);
+            receipt.rate_limit_reset = identity.rate_limit_reset;
+            return receipt;
         }
         let identity: Value = match serde_json::from_slice(&identity.body) {
             Ok(v) => v,
