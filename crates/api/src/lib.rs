@@ -8,6 +8,7 @@ mod ecosystem;
 mod factory;
 mod live_work;
 mod operator_status;
+mod supervised;
 pub use access::{OperatorCredential, Principal};
 use axum::Extension;
 use supa_persistence::Role;
@@ -37,6 +38,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct AppState {
     synthetic_factory_enabled: bool,
+    supervised_tasks_enabled: bool,
     agent_avatars_enabled: bool,
     pub live_work_enabled: bool,
     pub controlled: Option<supa_runtime::controlled::ControlledInference>,
@@ -61,6 +63,7 @@ impl AppState {
         }
         Ok(Self {
             synthetic_factory_enabled: false,
+            supervised_tasks_enabled: false,
             agent_avatars_enabled: false,
             controlled: None,
             live_work_enabled: false,
@@ -240,6 +243,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(access::routes())
         .merge(factory::routes())
+        .merge(supervised::routes())
         .merge(avatars::routes())
         .route("/operator-status", get(operator_status::status))
         .merge(economy::routes())
