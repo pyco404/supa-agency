@@ -1,0 +1,67 @@
+{
+  "status": "unapproved_review_candidates",
+  "method": "source-derived 2D motion and lighting; no generative video or 3D reconstruction",
+  "candidates": [
+    {
+      "section": "factory",
+      "source": "reference-web/public/assets/supa-factory-960.webp",
+      "source_sha256": "4fd745d0082f6b5a98112e24f25d8619a1becca3135ae0d14764bcc888893c90",
+      "filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X+sin(2*PI*T/4)*(0.7*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-0.55*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))),0,W-1),clip(Y+sin(2*PI*T/4)*(0.65*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-0.45*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))+0.35*exp(-pow((X-238)/57,2)-pow((Y-90)/38,2))),0,H-1))*(1)':g='g(clip(X+sin(2*PI*T/4)*(0.7*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-0.55*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))),0,W-1),clip(Y+sin(2*PI*T/4)*(0.65*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-0.45*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))+0.35*exp(-pow((X-238)/57,2)-pow((Y-90)/38,2))),0,H-1))*(1)':b='b(clip(X+sin(2*PI*T/4)*(0.7*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-0.55*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))),0,W-1),clip(Y+sin(2*PI*T/4)*(0.65*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-0.45*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))+0.35*exp(-pow((X-238)/57,2)-pow((Y-90)/38,2))),0,H-1))*(1)'",
+      "webm_sha256": "a42fc77e4aafcaf815e6f8d8fbf60806e5070c56d80035ad22a2502a061c2a2b",
+      "mp4_sha256": "e9568cbdb3b812ba8434cbe3f887dd349c22629c828033eef07f79e33bb37354",
+      "width": 480,
+      "height": 300,
+      "fps": 20,
+      "seconds": 4,
+      "artwork_replaced": false,
+      "production_enabled": false
+    },
+    {
+      "section": "economy",
+      "source": "reference-web/public/assets/supa-economy-960.webp",
+      "source_sha256": "424add80f4c901bd303b456f8cef1c60de098884ca29fd4c7937ebcb436129cb",
+      "filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X-(0.007*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(Y-130),0,W-1),clip(Y+(0.007*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(X-240),0,H-1))*(1+0.025*pow(0.5+0.5*cos(atan2(Y-130,X-240)-2*PI*T/4),8)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))':g='g(clip(X-(0.007*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(Y-130),0,W-1),clip(Y+(0.007*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(X-240),0,H-1))*(1+0.025*pow(0.5+0.5*cos(atan2(Y-130,X-240)-2*PI*T/4),8)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))':b='b(clip(X-(0.007*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(Y-130),0,W-1),clip(Y+(0.007*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(X-240),0,H-1))*(1+0.025*pow(0.5+0.5*cos(atan2(Y-130,X-240)-2*PI*T/4),8)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))'",
+      "webm_sha256": "bfcac0403a523ab68e5dbe8e0f2073ad9cb1fb1d9fbfc12545733fe3445777ca",
+      "mp4_sha256": "21215c8a5a9b606b7e2c790efaca4b3503833cbfa72bace6395e3f908361bd0c",
+      "width": 480,
+      "height": 300,
+      "fps": 20,
+      "seconds": 4,
+      "artwork_replaced": false,
+      "production_enabled": false
+    },
+    {
+      "section": "social",
+      "source": "reference-web/public/assets/supa-social-960.webp",
+      "source_sha256": "62381d2b3c5cb327c711c09a4533a316f39fd6eeac256524224ebfaf24f57f13",
+      "filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X,0,W-1),clip(Y,0,H-1))*(1+0.10*pow(0.5+0.5*cos(2*PI*(X/W+Y/H-T/4)),18)*min(1,(abs(g(X+1,Y)-g(X-1,Y))+abs(g(X,Y+1)-g(X,Y-1)))/24))':g='g(clip(X,0,W-1),clip(Y,0,H-1))*(1+0.10*pow(0.5+0.5*cos(2*PI*(X/W+Y/H-T/4)),18)*min(1,(abs(g(X+1,Y)-g(X-1,Y))+abs(g(X,Y+1)-g(X,Y-1)))/24))':b='b(clip(X,0,W-1),clip(Y,0,H-1))*(1+0.10*pow(0.5+0.5*cos(2*PI*(X/W+Y/H-T/4)),18)*min(1,(abs(g(X+1,Y)-g(X-1,Y))+abs(g(X,Y+1)-g(X,Y-1)))/24))'",
+      "webm_sha256": "d1411c251efbccd69588714c90cfbc368f4f77c9f8d841f9d06d43b629a722d8",
+      "mp4_sha256": "7e834181d673f536e8b59c6968fcd556bb1c4faae6dfc84139565b00513da386",
+      "width": 480,
+      "height": 300,
+      "fps": 20,
+      "seconds": 4,
+      "artwork_replaced": false,
+      "production_enabled": false
+    },
+    {
+      "section": "trading",
+      "source": "reference-web/public/assets/supa-trading-960.webp",
+      "source_sha256": "3f85e02f70dc3db720ef111857f1a1aa3ee536ed2cab528404c36f983383e697",
+      "filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X-(0.005*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(Y-171),0,W-1),clip(Y+(0.005*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(X-240),0,H-1))*(1+0.055*pow(0.5+0.5*cos(atan2(Y-171,X-240)-2*PI*T/4),12)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))':g='g(clip(X-(0.005*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(Y-171),0,W-1),clip(Y+(0.005*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(X-240),0,H-1))*(1+0.055*pow(0.5+0.5*cos(atan2(Y-171,X-240)-2*PI*T/4),12)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))':b='b(clip(X-(0.005*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(Y-171),0,W-1),clip(Y+(0.005*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(X-240),0,H-1))*(1+0.055*pow(0.5+0.5*cos(atan2(Y-171,X-240)-2*PI*T/4),12)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))'",
+      "webm_sha256": "61e39a76b5cc8738e552cd411a8764316e784f5bca350e8d1d0dfd4dc4ee13fb",
+      "mp4_sha256": "34e94675397d171aaa9ec281da12f7ae26a683953ab63ba4ce85954fa2fe48f0",
+      "width": 480,
+      "height": 300,
+      "fps": 20,
+      "seconds": 4,
+      "artwork_replaced": false,
+      "production_enabled": false
+    }
+  ],
+  "encoding": {
+    "webm": "VP9 CRF32",
+    "mp4": "H.264 constant QP12, no B frames, uniform I/P quantization, faststart"
+  },
+  "ffmpeg_version": "ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers"
+}
