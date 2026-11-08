@@ -26,3 +26,16 @@ test('origin checks reject cross-origin requests and preserve authenticated stag
  assert.equal(localRequest(request('/',{host:'supa-web-staging.up.railway.app',origin:'https://supaagency.xyz'})),false);
  process.env.SUPA_SITE_MODE='development';assert.equal(publicLandingRequest(request()),false);
 }finally{restore();}});
+test('navigation loops admit only reviewed public asset names and preserve origin/method boundaries',()=>{try{
+ configured();
+ for(const section of ['economy','social','trading','factory'])for(const format of ['webm','mp4']){
+  const path=`/public/assets/supa-${section}-loop.${format}`;
+  assert.equal(publicLandingRequest(request(path)),true,path);
+  assert.equal(publicLandingRequest(request(path,{method:'HEAD'})),true,path);
+  assert.equal(publicLandingRequest(request(path,{method:'POST'})),false,path);
+  assert.equal(publicLandingRequest(request(path,{origin:'https://untrusted.invalid'})),false,path);
+  assert.equal(publicLandingRequest(request(path,{host:'supa-web-staging.up.railway.app'})),false,path);
+ }
+ for(const path of ['/public/assets/private.webm','/public/uploads/avatar.mp4','/public/assets/supa-home-loop.webm','/public/assets/supa-economy-loop.mp4/extra','/public/assets/supa-economy-loop.mp4.secret','/api/private.mp4','/operator'])assert.equal(publicLandingRequest(request(path)),false,path);
+ process.env.SUPA_PUBLIC_LANDING_ENABLED='false';assert.equal(publicLandingRequest(request('/public/assets/supa-economy-loop.webm')),false);
+}finally{restore();}});
