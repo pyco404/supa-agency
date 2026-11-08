@@ -23,7 +23,7 @@ async function copyPublic(directory, relative = "") {
     const source = join(directory, entry.name);
     const target = join(destination, "public", relative, entry.name);
     if (entry.isDirectory()) await copyPublic(source, join(relative, entry.name));
-    else if (entry.isFile() && (extensions.has(extname(entry.name)) || join(relative, entry.name) === join("fonts", "OFL.txt"))) {
+    else if (entry.isFile() && (extensions.has(extname(entry.name)) || /^assets\/supa-(economy|social|trading|factory)-loop\.(webm|mp4)$/.test(join(relative, entry.name)) || join(relative, entry.name) === join("fonts", "OFL.txt"))) {
       const actual = await realpath(source);
       if (!actual.startsWith(`${resolve(root, "public")}${sep}`) || !(await stat(actual)).isFile()) throw new Error("Invalid public asset");
       await mkdir(dirname(target), { recursive: true });
