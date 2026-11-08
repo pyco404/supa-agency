@@ -42,6 +42,8 @@ export function createCardMedia(entry) {
     const current = document.createElement("video");
     video = current;
     current.className = "wheel-motion";
+    current.controls = false;
+    current.setAttribute("disableRemotePlayback", "");
     current.muted = true;
     current.defaultMuted = true;
     current.autoplay = true;
