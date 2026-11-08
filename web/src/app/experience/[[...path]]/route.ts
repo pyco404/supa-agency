@@ -5,6 +5,7 @@ import { readResource, runAutonomy, isEconomicPath } from "../../../../../refere
 import { operatorAuthorized, publicLandingRequest, publicSectionPaths } from "@/lib/auth";
 
 import { avatarRoute, avatarsEnabled } from "@/lib/avatars";
+import { supervisedEnabled } from "@/lib/supervised";
 import { factoryRoute } from "@/lib/factory";
 import { factoryAuthorization, factoryEnabled } from "@/lib/factory-session";
 
@@ -38,7 +39,7 @@ export async function GET(request: Request, context: { params: Promise<{ path?: 
   if (path.startsWith("/api/factory/")) return factoryRoute(request, path);
   if (factoryEnabled() && (["/sign-in", "/factory/create", "/my-agents"].includes(path) || /^\/my-agents\/[0-9a-f-]{36}$/.test(path))) {
     if (path !== "/sign-in" && !factoryAuthorization(request)) return new Response(null, {status:303,headers:{...headers,Location:"/sign-in"}});
-    return new Response((await readFile(resolve(process.cwd(), "../reference-web/factory-create.html"),"utf8")).replace('<html lang="en">',avatarsEnabled()?'<html lang="en" data-avatars-enabled="true">':'<html lang="en">'),{headers:{...headers,"Content-Type":"text/html; charset=utf-8"}});
+    return new Response((await readFile(resolve(process.cwd(), "../reference-web/factory-create.html"),"utf8")).replace('<html lang="en">','<html lang="en"'+(avatarsEnabled()?' data-avatars-enabled="true"':'')+(supervisedEnabled()?' data-supervised-enabled="true"':'')+'>'),{headers:{...headers,"Content-Type":"text/html; charset=utf-8"}});
   }
   const publicLanding = request.headers.get("x-supa-public-landing") === "1"
     && publicLandingRequest(new Request(new URL(path, request.url), {method:request.method, headers:request.headers}));
