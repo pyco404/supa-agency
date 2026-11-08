@@ -208,3 +208,98 @@ Next approval is one corrected export attempt with the same temporary identities
 and stop for separate isolated-restore approval. Do not reuse the spent intent or
 automatically retry. Independent encrypted off-platform recovery remains required
 before real-user onboarding or sensitive production records.
+
+## Corrected export succeeded — November 8, 2026
+
+Owner-authorized approved application HEAD:
+`2edfdb73b7866a2e8bf97b60c1a22b1654979fd3`. The working tree was clean and
+matched that exact revision before execution. No push was performed. The new
+single-use corrected intent preserved every previous failed-attempt receipt.
+Only receipt filenames changed from the reviewed corrected controller; the
+portable 90-second launcher, read-only snapshot, minimum grants and size gates
+were preserved. Executed controller SHA-256:
+`6021a3916a482d1e31bbf999e3304e5034fb654c1dbf5f67cd8936e14fb18312`.
+
+Fresh preflight passed on the exact existing project/staging/PostgreSQL service
+and unchanged approved image/deployment. PostgreSQL/client tools were 18.6,
+verified TLS 1.3 passed, all 13 original migration SHA-384 checksums matched,
+and the approved paused/zero-balance synthetic fixture and expected API-only
+health records matched. Original roles, table owners, runtime privileges and
+schema/function metadata passed review. Three non-expired native backups remain
+listed, without any native restore claim. Usage was $22.34291187142247/$60,
+not over limit. No existing service, credentials or execution flags changed.
+Six diagnostics/launcher tests and disposable PG18 permission/cleanup tests
+passed before execution; the secrets scan passed.
+
+**Exactly one corrected logical export succeeded**, completed November 8 at
+01:23:05 UTC / 02:23:05 WAT. The restricted login assumed its temporary NOLOGIN
+export role. All 50 table and six sequence read permissions passed, no sequence
+write privileges existed, and eight SQLSTATE 42501 denial tests passed. The
+read-only snapshot holder remained open while both the inventory and pg_dump
+used its exported repeatable-read snapshot. Portable `timeout -s TERM 90`
+returned dump exit code 0 with no client diagnostic output. No retry occurred.
+
+| Accepted object | Format | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| Logical database dump | PostgreSQL custom archive | 231,429 | `5c153422e0184c946534b9e2e478aaa084d0ce89bc5bf95fc6a4cb0d33045842` |
+| Complete retained recovery bundle | tar, five reviewed members | 899,072 | `b41dc02aa1c76f4acd1d4c0c57cf542f73de3c575c07d62e1e63a03f705eba82` |
+
+The 16,777,216-byte limit applies to the complete bundle, not merely the dump.
+Accepted bundle members: database.dump, snapshot.json, snapshot.sql, before.json
+and before.sql. Read-only pg_restore TOC/decompression checks passed without
+executing restored SQL. Coverage was 50 TABLE DATA and six SEQUENCE SET entries.
+The dump extracted from the bundle matched the original accepted dump SHA-256.
+A separate SSH observation recomputed the complete bundle and embedded dump
+hashes and measured their sizes independently. No database contents were printed,
+transferred off-platform or retained as local plaintext backup artifacts.
+
+The validated bundle remains privately on the existing Railway PostgreSQL
+volume, in the unique directory recorded by the private corrected-export intent
+and receipt. Directory mode 0700 and bundle mode 0600 were independently verified.
+Only recovery.tar remains; loose dumps, SQL/probe files and temporary credentials
+were removed. No automatic deletion policy was added while isolated restore is
+pending. This same-volume, provider-controlled storage is not an independent
+backup destination, independent key custody, off-platform encryption/signature
+verification or protection from source-volume loss. No recovery/signing private
+keys were generated. The non-secret receipt is unsigned and does not claim them.
+
+The full pre/post logical inventory comparison passed across all source tables,
+rows, column definitions, constraints, indexes, sequence states, function
+identities/definitions, triggers and normalized object ACLs. Only ordinary API
+heartbeat timestamps were excluded from that comparison; the API was not paused
+or restarted. Separate post-export read-only review also matched identity,
+migration history, table/sequence inventory, owners, original role attributes,
+database/schema ACL metadata, function definitions/ACLs, runtime DML matrix,
+canonical fixture, table counts and health summary.
+
+After the snapshot and dump sessions closed, the temporary export membership,
+SELECT/schema grants and both temporary identities were removed. Independent
+verified-TLS SQL confirmed zero remaining temporary roles and zero sessions.
+The source remains PostgreSQL 18.6, TLS 1.3, healthy and outside recovery mode.
+No migrations, financial rows, existing credentials, API/frontend settings,
+DNS or original service deployments were changed. All execution restrictions
+remain in place.
+
+Result: **export/integrity/access-cleanup PASS; restoration NOT ATTEMPTED**.
+No temporary environment, service, volume or recovery credentials were created.
+No native backup was restored. The isolated recovery test and restart-persistence
+checks remain pending; successful archive readback is not successful restoration.
+The preserved dump includes the snapshot's object owners/ACLs, including the
+now-removed temporary export-role grant. The isolated restore must use the reviewed
+nonprivileged placeholder/owner-role mapping, isolated credentials and temporary
+ACL cleanup; it must not import source password verifiers or broaden source grants.
+
+Next approval: one isolated temporary PostgreSQL 18 recovery drill using the
+exact retained bundle hash, controlled private transfer, fresh target/credentials,
+reviewed role mapping, schema/data/migration/permission comparisons, clone-only
+restart and cleanup limited to those newly recorded recovery resources. No new
+export or application deployment is needed if this retained bundle is still
+available and hash-matched. Recovery remains unverified until that independently
+read restored database passes. Independent encrypted off-platform recovery stays
+mandatory before real-user onboarding or sensitive production records.
+
+Private non-secret evidence: corrected-export-intent.json,
+corrected-export-result.json, corrected-export-verification.json and
+corrected-export-receipt.json under ignored
+`artifacts/railway-logical-recovery-drill/`. Actual backup bytes remain only in
+private Railway storage. No credentials, rows or private key material enter Git.
