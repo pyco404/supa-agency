@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Opt-in, new socket-only PG18 cluster. Never accepts existing DB URLs or paths."""
-import hashlib,json,os,pathlib,subprocess,uuid,shutil
+import hashlib,json,os,pathlib,subprocess,uuid,shutil,sys
 from urllib.parse import urlencode
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 PG=ROOT/'artifacts/ecosystem-pg18-binaries/root/usr/lib/postgresql/18/bin'
@@ -49,6 +49,11 @@ def main():
         pg('pg_ctl','-D',data,'-m','fast','-w','stop');started=False
         pg('pg_ctl','-D',data,'-l',OUT/'postgres.log','-w','start');started=True
         run(test+['--exact','factory_restart_recovery','--include-ignored','--nocapture'],'recovery.log')
+        if '--supervised' in sys.argv:
+            run(test+['--exact','supervised_journey','--include-ignored','--nocapture'],'supervised.log')
+            pg('pg_ctl','-D',data,'-m','fast','-w','stop');started=False
+            pg('pg_ctl','-D',data,'-l',OUT/'postgres.log','-w','start');started=True
+            run(test+['--exact','supervised_restart_recovery','--include-ignored','--nocapture'],'supervised-recovery.log')
         assert hashes=={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((ROOT/'migrations').glob('*.sql'))}
         (OUT/'postgres-result.json').write_text(json.dumps({'passed':True,'postgres_version':version,'socket_only':True,'disposable_cluster':str(work),'real_restart_recovery':True,'restricted_role':True,'concurrent_idempotency':True,'atomic_rollback':True,'existing_migrations_unchanged':True,'railway_operations':0},indent=2)+'\n')
     finally:
