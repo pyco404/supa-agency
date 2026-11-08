@@ -1,6 +1,9 @@
 //! Explicit owner-terminal binding. Nothing is started or connected at module load.
 //! No publishing endpoint, refresh worker, credential export or automatic retry.
 use super::*;
+#[path = "authorization.rs"]
+pub mod authorization;
+use authorization::AuthorizationReceipt;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
@@ -198,8 +201,26 @@ pub struct ConnectionApproval {
     client_id: String,
     expires: u64,
     expected_id: Option<String>,
+    receipt: Option<AuthorizationReceipt>,
 }
 impl ConnectionApproval {
+    /// The terminal assertion alone never permits a live connection.
+    pub fn with_receipt(mut self, receipt: AuthorizationReceipt) -> Result<Self> {
+        if !receipt.matches(self.owner, &self.client_id) {
+            return Err(Error::Denied);
+        }
+        receipt.check()?;
+        self.expires = self.expires.min(receipt.expires());
+        self.receipt = Some(receipt);
+        Ok(self)
+    }
+    fn authorize(&self) -> Result<()> {
+        if unix_now()? >= self.expires {
+            return Err(Error::Denied);
+        }
+        self.receipt.as_ref().ok_or(Error::Denied)?.check()
+    }
+
     pub fn owner_approved(
         owner: Uuid,
         client_id: String,
@@ -220,6 +241,7 @@ impl ConnectionApproval {
             client_id,
             expires,
             expected_id,
+            receipt: None,
         })
     }
 }
@@ -400,9 +422,17 @@ impl HttpsTransport {
         &self,
         exchange: TokenExchange,
         cancel: &watch::Receiver<bool>,
+        receipt: Option<&AuthorizationReceipt>,
     ) -> Result<(TokenBody, IdentityData)> {
         let began = Instant::now();
         if *cancel.borrow() || cancel.has_changed().is_err() {
+            return Err(Error::Denied);
+        }
+        authorize_transport(receipt)?;
+        if *cancel.borrow()
+            || cancel.has_changed().is_err()
+            || began.elapsed() >= Duration::from_secs(6)
+        {
             return Err(Error::Denied);
         }
         let mut auth = reqwest::header::HeaderValue::from_str(
@@ -429,6 +459,14 @@ impl HttpsTransport {
         {
             return Err(Error::Denied);
         }
+        authorize_transport(receipt)?;
+        if *cancel.borrow()
+            || cancel.has_changed().is_err()
+            || began.elapsed() >= Duration::from_secs(token.expires_in)
+            || began.elapsed() >= Duration::from_secs(6)
+        {
+            return Err(Error::Denied);
+        }
         let mut auth =
             reqwest::header::HeaderValue::from_str(&format!("Bearer {}", &*token.access_token))
                 .map_err(|_| Error::Denied)?;
@@ -449,6 +487,15 @@ impl HttpsTransport {
             return Err(Error::Denied);
         }
         Ok((token, identity.data))
+    }
+}
+
+fn authorize_transport(receipt: Option<&AuthorizationReceipt>) -> Result<()> {
+    match receipt {
+        Some(receipt) => receipt.check(),
+        // Synthetic TLS fixture tests never possess authority or call real X.
+        None if cfg!(test) => Ok(()),
+        None => Err(Error::Denied),
     }
 }
 
@@ -473,6 +520,7 @@ pub struct LocalConnection {
 }
 impl LocalConnection {
     pub async fn prepare(approval: ConnectionApproval) -> Result<Self> {
+        approval.authorize()?;
         let listener = CallbackListener::bind().await?;
         let keyring = PrivateKeyring::new(approval.owner)?;
         let config = OAuthPreparation::confidential_from_custody(
@@ -483,6 +531,7 @@ impl LocalConnection {
         if unix_now()? >= approval.expires {
             return Err(Error::Denied);
         }
+        approval.authorize()?;
         let pending = config.begin(approval.owner, unix_now()?)?;
         Ok(Self {
             listener,
@@ -491,8 +540,9 @@ impl LocalConnection {
             keyring,
         })
     }
-    pub fn private_authorize_url(&self) -> &str {
-        self.pending.authorize_url()
+    pub fn private_authorize_url(&self) -> Result<&str> {
+        self.approval.authorize()?;
+        Ok(self.pending.authorize_url())
     }
     pub async fn finish_authorized(
         mut self,
@@ -502,6 +552,7 @@ impl LocalConnection {
             self.pending.cancel();
             return Err(Error::Denied);
         }
+        self.approval.authorize()?;
         let remaining = Duration::from_secs(self.approval.expires.saturating_sub(unix_now()?));
         let current_cancel = cancel.clone();
         let result = tokio::select! {
@@ -511,13 +562,14 @@ impl LocalConnection {
                 let exchange=self.pending.consume(self.approval.owner,&callback,unix_now()?)?;
                 let began=Instant::now();let now=unix_now()?;
                 let transport=HttpsTransport::new()?;
-                let (token,identity)=tokio::time::timeout(Duration::from_secs(6),transport.connect(exchange, &current_cancel)).await.map_err(|_|Error::Timeout)??;
+                let (token,identity)=tokio::time::timeout(Duration::from_secs(6),transport.connect(exchange, &current_cancel, self.approval.receipt.as_ref())).await.map_err(|_|Error::Timeout)??;
                 if unix_now()?>=self.approval.expires || began.elapsed()>=Duration::from_secs(token.expires_in)
                     || self.approval.expected_id.as_ref().is_some_and(|id|id!=&identity.id){return Err(Error::Denied);}
                 let expires=now.checked_add(token.expires_in).ok_or(Error::Denied)?;
                 // No token reaches the browser/report. A storage failure is a consumed
                 // attempt, not permission to repeat the exchange or identity read.
                 if *current_cancel.borrow() { return Err(Error::Denied); }
+                self.approval.authorize()?;
                 self.keyring.retain(&self.approval.client_id,&token,&identity,expires)?;
                 if *current_cancel.borrow() || unix_now()? >= expires || unix_now()? >= self.approval.expires { return Err(Error::Denied); }
                 Ok(ConnectionReceipt{owner_id:self.approval.owner,client_id:self.approval.client_id.clone(),account_id:identity.id,username:identity.username,expires_unix:expires,scope:SCOPES.iter().map(|s|s.to_string()).collect(),publishing_enabled:false})
