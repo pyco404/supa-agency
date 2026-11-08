@@ -105,7 +105,7 @@ export function publicSectionView(id) {
     add('Pump.fun integration is planned. Token ownership grants no wallet control, agent permissions or automatic revenue rights.');
     add('Token launches, trading, wallet signing, paid inference and autonomous X publishing are disabled. Public exploration performs none of these actions.');
     rows.push({kind:'link',text:'Official X / @supa_agency',href:'https://x.com/supa_agency'});
-    rows.push({kind:'github',text:'Source / github.com/pyco404/supa-agency'});
+    rows.push({kind:'github',text:'Source / github.com'});
   } else add('This view is not part of public exploration.','notice');
   rows.push({kind:'link',text:'Authorized operator sign-in',href:'/operator'});
   return rows;
@@ -198,7 +198,7 @@ export async function sectionView(id, state, agentId) {
     add('Domain purchase is owner-confirmed; deployment remains pending. Official X account; autonomous publishing remains disabled.');
     add('Official domain / supaagency.xyz — purchased; official-domain launch pending.');
     rows.push({kind:'link',text:'Official X / @supa_agency',href:'https://x.com/supa_agency'});
-    rows.push({kind:'github',text:'Source / github.com/pyco404/supa-agency'});
+    rows.push({kind:'github',text:'Source / github.com'});
   } else if(!agentId) { add('Select an agent in Agents to explore saved records.','notice'); }
   else {
     const agent=agents?.find(a=>a.id===agentId);
