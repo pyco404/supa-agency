@@ -1,8 +1,18 @@
 # Original-art navigation motion: review candidates
 
-Status: local review only. The active navigation mapping remains null/static.
-No public file was replaced, source artwork changed, CI run dispatched or website
-deployed. Original Factory, Economy, Social and Trading artwork is reused directly.
+Status: enabled in the local frontend following the request to use the four loops.
+The eight exact checksummed candidates are copied to `reference-web/public/assets`;
+`navigationMotion` in `platform.js` maps WebM first and MP4 second. Original stills
+remain unchanged. No push, CI build, publication, Railway change or deployment is
+part of this implementation. The candidate manifest retains its historical review
+status; the validator separately checks the active mapping and public-copy hashes.
+
+Only the selected, visible card loads/plays a video. Inactive cards, hidden tabs,
+closed mobile navigation and off-screen navigation release their decoders. The
+existing Pause branches control also pauses card media. Reduced motion loads no
+video; loading errors, autoplay rejection or the eight-second startup timeout keep
+the original still. Video controls and remote playback are disabled. Captions,
+rectangular cover cropping, navigation and authentication are unchanged.
 
 ## What was produced
 
@@ -42,12 +52,12 @@ ignored `artifacts/navigation-motion-candidates/validation.json`.
 The WebM files are 21,901–30,054 bytes; MP4 files are 69,342–187,178 bytes.
 These measurements describe the actual candidates, not hypothetical budgets.
 Frame strips and desktop/tablet/mobile screenshots supplement browser playback;
-owner visual approval remains necessary. Chrome mobile emulation is not physical
+These checks complement visual review. Chrome mobile emulation is not physical
 iOS/Safari certification.
 
 The existing card/browser regression can explicitly load these candidates through
-its local request interceptor with `SUPA_NAV_MOTION_CANDIDATES=1`. This does not
-change the production mapping or copy files into public assets. It tests all four
+its local request interceptor with `SUPA_NAV_MOTION_CANDIDATES=1`. The default regression now reads the actual public copies and active mapping;
+the optional interceptor remains available to review historical candidate files. It tests all four
 clips, actual WebM and MP4 fallback, selected-only playback, reduced motion,
 hidden tabs/drawers, pause, cleanup, unauthorized requests and private-route denial.
 Performance sampling begins after carousel handover and records both startup and
@@ -65,17 +75,15 @@ original posters. The local loopback-only review server, when running, exposes
 only this page, these eight clips and the four public source images. It has no
 API, database, credential or application-record access. Nothing autoplays there.
 
-1. Owner reviews and approves the four visual candidates (or requests adjustments).
-2. Only after approval, copy the exact eight checksummed clips to the existing
-   approved public filenames and fill the four existing `navigationMotion` slots.
-   Keep all other sections static and preserve reduced-motion behavior.
-3. Pin one frontend validation to the resulting exact source; test actual packaged
-   clips, browser/authentication boundaries and full unsuppressed vulnerability
-   and embedded-secret gates. Avoid building the unchanged current static version
-   just to repeat work before the candidate review.
-4. Private publication of the exact validated archive and one frontend deployment
-   require their separate approvals. No Rust API/database changes are needed for
-   navigation motion. Supervised API validation remains a separate pending gate.
+1. Local assets are now connected; inspect the four cards in the existing preview.
+2. After approval, synchronize the exact application source and pin frontend CI to
+   that revision. Validate packaged clips, browser/authentication boundaries and
+   full unsuppressed vulnerability and embedded-secret gates.
+3. Private publication of the exact validated archive and one frontend deployment
+   need separate approval. No Rust API or database changes are needed.
 
-Static images remain active until step 2 is explicitly authorized. Agent execution,
-registration, inference, trading, signing, launches and X publishing remain disabled.
+Agent execution, registration, inference, trading, signing, launches and X publishing
+remain unchanged. Browser tests cover real WebM and MP4 decoding, fallback images,
+reduced motion, selected-only playback, hidden/off-screen release, loop wrapping,
+rectangular geometry, overflow and zero private API/mutation requests at desktop,
+tablet and mobile sizes. Frame-level checks cover all eight loops and their seams.
