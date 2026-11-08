@@ -81,6 +81,7 @@ BEGIN
  IF g.id IS NULL OR g.owner_id<>actor OR g.agent_id<>p.agent_id OR g.account IS DISTINCT FROM p.account
  THEN RAISE EXCEPTION 'grant_denied' USING ERRCODE='42501'; END IF;
  IF op IN ('pause','resume','stop','revoke') THEN
+  IF op='resume' AND (EXISTS(SELECT 1 FROM social_autonomy.attempts h WHERE h.account_id=p.account->>'id' AND h.state IN ('in_flight','uncertain')) OR EXISTS(SELECT 1 FROM social_review.attempts h WHERE h.account_id=p.account->>'id' AND h.state='uncertain')) THEN RAISE EXCEPTION 'unconfirmed_account' USING ERRCODE='42501'; END IF;
   IF op='resume' AND (g.state NOT IN ('paused','active') OR g.expires_at<=now_at) THEN RAISE EXCEPTION 'resume_denied' USING ERRCODE='42501'; END IF;
   IF g.state IN ('stopped','revoked') AND op NOT IN ('stop','revoke') THEN RAISE EXCEPTION 'terminal_grant' USING ERRCODE='42501'; END IF;
   UPDATE social_autonomy.grants SET state=CASE op WHEN 'resume' THEN 'active' WHEN 'pause' THEN 'paused' WHEN 'stop' THEN 'stopped' ELSE 'revoked' END,
@@ -110,7 +111,9 @@ BEGIN
    'due',g.state='active' AND g.expires_at>now_at AND g.next_at<=now_at
     AND g.reserved+25000<=g.budget AND count_recent<g.max_posts
     AND (latest IS NULL OR latest<=now_at-make_interval(secs=>g.interval_seconds+8))
-    AND (reset_at IS NULL OR reset_at<=now_at),
+    AND (reset_at IS NULL OR reset_at<=now_at)
+    AND NOT EXISTS(SELECT 1 FROM social_autonomy.attempts h WHERE h.account_id=p.account->>'id' AND h.state IN ('reserved','in_flight','uncertain'))
+    AND NOT EXISTS(SELECT 1 FROM social_review.attempts h WHERE h.account_id=p.account->>'id' AND h.state IN ('reserved','uncertain')),
    'attempts',coalesce((SELECT jsonb_agg(to_jsonb(hist) ORDER BY hist.created_at) FROM social_autonomy.attempts hist WHERE grant_id=chosen),'[]'),
    'audit',coalesce((SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM social_autonomy.events e WHERE agent_id=p.agent_id),'[]'));
  END IF;
@@ -146,7 +149,9 @@ BEGIN
  END IF;
  IF op<>'reserve' THEN RAISE EXCEPTION 'operation_denied' USING ERRCODE='42501'; END IF;
  IF a.id IS NOT NULL THEN RETURN jsonb_build_object('fresh',false,'attempt',to_jsonb(a)); END IF;
- IF g.next_at>now_at OR g.reserved+25000>g.budget OR b->>'context_sha256' IS DISTINCT FROM encode(sha256(convert_to(c::text,'UTF8')),'hex')
+ IF EXISTS(SELECT 1 FROM social_autonomy.attempts h WHERE h.account_id=p.account->>'id' AND h.state IN ('reserved','in_flight','uncertain'))
+  OR EXISTS(SELECT 1 FROM social_review.attempts h WHERE h.account_id=p.account->>'id' AND h.state IN ('reserved','uncertain'))
+  OR g.next_at>now_at OR g.reserved+25000>g.budget OR b->>'context_sha256' IS DISTINCT FROM encode(sha256(convert_to(c::text,'UTF8')),'hex')
  THEN RAISE EXCEPTION 'not_due_or_budget_or_stale' USING ERRCODE='42501'; END IF;
  -- Count every reserved/failed/uncertain request conservatively, across all grants and manual attempts.
  IF count_recent>=g.max_posts OR latest>now_at-make_interval(secs=>g.interval_seconds+8) OR reset_at>now_at
@@ -176,7 +181,8 @@ BEGIN
   SELECT created_at FROM social_autonomy.attempts WHERE account_id=NEW.account_id
   UNION ALL SELECT created_at FROM social_review.attempts WHERE account_id=NEW.account_id) q;
  SELECT max(to_timestamp((receipt->>'rate_limit_reset')::double precision)) INTO rate_reset FROM social_autonomy.attempts WHERE account_id=NEW.account_id AND receipt->>'http_status'='429';
- IF recent>=6 OR latest>now_at-interval '4 hours 8 seconds' OR rate_reset>now_at
+ IF EXISTS(SELECT 1 FROM social_autonomy.attempts h WHERE h.account_id=NEW.account_id AND h.state IN ('reserved','in_flight','uncertain'))
+  OR recent>=6 OR latest>now_at-interval '4 hours 8 seconds' OR rate_reset>now_at
   OR EXISTS(SELECT 1 FROM social_autonomy.attempts hist WHERE hist.account_id=NEW.account_id AND lower(regexp_replace(hist.text,'[^[:alnum:]]','','g'))=NEW.normalized_text) THEN RAISE EXCEPTION 'shared_account_cap' USING ERRCODE='42501'; END IF;
  RETURN NEW;
 END $$;
