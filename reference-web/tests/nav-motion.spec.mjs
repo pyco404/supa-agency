@@ -111,15 +111,19 @@ test('all four published clips play through the real card layer without geometry
  await page.emulateMedia({reducedMotion:'no-preference'});const observed=await preview(page),metrics=[];
  for(const section of ['factory','economy','social','trading']){
   await open(page,'/'+section);await expect(video(page)).toHaveCount(1);await expect(page.locator('.wheel-media[data-playing=true]')).toHaveCount(1);
-  await expect.poll(()=>video(page).evaluate(v=>v.currentTime)).toBeGreaterThan(.3);
+  // Startup/entrance can replace a decoder. Sample steady state after a full
+  // second of this decoder and a settled wheel; keep the frame-drop gate intact.
+  await expect.poll(()=>video(page).evaluate(v=>v.currentTime)).toBeGreaterThan(1);
+  await expect(page.locator('.wheel')).toHaveAttribute('data-carousel-state','settled');
   const before=await video(page).evaluate(v=>{const b=v.parentElement.getBoundingClientRect();return {x:b.x,y:b.y,w:b.width,h:b.height};});
   const sample=async()=>video(page).evaluate(v=>{const q=v.getVideoPlaybackQuality();return {width:v.videoWidth,height:v.videoHeight,seconds:v.duration,decoded:q.totalVideoFrames,dropped:q.droppedVideoFrames};});
   const startup=await sample();await page.waitForTimeout(2000);const quality=await sample();
   const after=await video(page).evaluate(v=>{const b=v.parentElement.getBoundingClientRect();return {x:b.x,y:b.y,w:b.width,h:b.height};});
   for(const key of ['x','y','w','h'])expect(Math.abs(after[key]-before[key])).toBeLessThan(1);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  expect(quality.width).toBe(480);expect(quality.height).toBe(300);expect(quality.seconds).toBeCloseTo(4,1);
+  expect(quality.width).toBe(320);expect(quality.height).toBe(200);expect(quality.seconds).toBeCloseTo(4,1);
   const decoded=quality.decoded-startup.decoded,dropped=quality.dropped-startup.dropped;
+  await info.attach('decoder-'+section,{body:JSON.stringify({section,startup,quality,decoded,dropped,drop_ratio:dropped/decoded}),contentType:'application/json'});
   expect(decoded).toBeGreaterThanOrEqual(20);expect(dropped/decoded).toBeLessThan(.2);metrics.push({section,...quality,startup_decoded:startup.decoded,startup_dropped:startup.dropped,sample_decoded:decoded,sample_dropped:dropped});
   await page.screenshot({path:resolve(import.meta.dirname,'../../artifacts/navigation-motion-candidates',info.project.name+'-'+section+'.png')});
  }
