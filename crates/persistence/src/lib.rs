@@ -1,3 +1,5 @@
+mod social_review;
+pub use social_review::SocialReviewCommand;
 mod access;
 mod avatars;
 mod factory;
