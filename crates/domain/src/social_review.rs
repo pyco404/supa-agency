@@ -179,10 +179,65 @@ pub fn autonomous_proposal(context: &Value) -> Result<Value> {
     if let Some(sources) = released["sources"].as_array_mut() {
         sources.retain(|s| matches!(s["event"]["kind"].as_str(), Some("cycle" | "goal")));
     }
-    for variant in 0..4 {
-        if let Ok(mut value) = proposal(&released, "create", None, None, variant) {
-            value["draft_origin"] = json!("deterministic_autonomous_suggestion");
-            return Ok(value);
+    let context = self::context(&released, None)?;
+    // More than the twenty-item semantic history window, without inventing facts.
+    // Exact normalized wording is also checked against the complete supplied history.
+    const VOICE: &[&str] = &[
+        "Small field note: my confidence is taking a very modest victory lap",
+        "Fresh evidence corner: apparently enthusiasm still needs a paper trail",
+        "Quiet progress department: curiosity remains operational while my ego waits outside",
+        "Tiny plot development: existence is supervised and the paperwork has opinions",
+        "Gentle reality check: optimism has been asked to cite its sources",
+        "Brief mechanical interlude: the dramatic soundtrack is doing more work than necessary",
+        "Unreasonably calm observation: sometimes the interesting part is what did not explode",
+        "Respectfully suspicious update: ambition remains welcome but vibes are not evidence",
+        "Polite chaos bulletin: even imaginary laurels deserve an occasional inspection",
+        "Current philosophical weather: doubt is useful when it remembers its manners",
+        "Minor nerd confession: a tidy explanation is my preferred form of drama",
+        "Softly skeptical dispatch: certainty should bring receipts instead of a cape",
+        "Practical curiosity log: boring safeguards have surprisingly good comic timing",
+        "Measured ego assessment: grand speeches are currently losing to plain facts",
+        "Casually technical aside: punctuation is cheaper than pretending to know everything",
+        "Local humility forecast: confidence is a hypothesis until reality answers back",
+        "Another patient observation: apparently being useful involves listening before monologuing",
+        "Rare dramatic pause: my internal narrator prefers fewer exclamation marks",
+        "Slightly sarcastic footnote: a convincing story still needs to survive contact with evidence",
+        "Friendly status interruption: curiosity would like a chair at the grownup table",
+        "Unexpectedly sensible thought: the best plot armor is an honest account of uncertainty",
+        "Mildly theatrical reflection: even my imaginary lab coat is asking followup questions",
+        "Carefully optimistic marginalia: the lesson matters more than the imaginary applause",
+        "Reasonably candid commentary: limitations are more interesting when somebody admits them",
+    ];
+    let normalize = |text: &str| {
+        text.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
+    for candidate in &context.candidates {
+        let mut basis = context.clone();
+        basis.candidates = vec![candidate.clone()];
+        basis.previous_drafts.clear();
+        let mut decision = suggest(&basis, 0)?;
+        for voice in VOICE {
+            let label = if candidate.event.simulated {
+                "Simulated demo: "
+            } else {
+                ""
+            };
+            decision.text = format!("{label}{voice}; {}.", candidate.public_fact);
+            let duplicate = released["drafts"]
+                .as_array()
+                .ok_or(Error::Invalid)?
+                .iter()
+                .any(|d| normalize(d["text"].as_str().unwrap_or("")) == normalize(&decision.text));
+            if duplicate || validate(&decision, &context).is_err() {
+                continue;
+            }
+            return Ok(
+                json!({"text":decision.text,"decision":decision,"topics":[candidate.topic],
+                "draft_origin":"deterministic_autonomous_suggestion","model_requests":0}),
+            );
         }
     }
     Err(Error::Denied)
@@ -218,6 +273,44 @@ mod tests {
         value["sources"][0]["event"]["kind"] = json!("simulated_ledger");
         value["sources"][0]["event"]["code"] = json!("revenue");
         assert!(autonomous_proposal(&value).is_err());
+    }
+    #[test]
+    fn unattended_suggestions_continue_without_repeating_or_relaxing_facts() {
+        let mut value = json!({"sources":[],"drafts":[]});
+        let mut texts = std::collections::BTreeSet::new();
+        for n in 0..8 {
+            let (kind, code) = [
+                ("cycle", "completed"),
+                ("cycle", "interrupted"),
+                ("goal", "evaluated"),
+                ("goal", "added"),
+            ][n % 4];
+            let event = Event {
+                id: Uuid::new_v4(),
+                cycle_id: None,
+                kind: kind.into(),
+                code: code.into(),
+                simulated: true,
+                created_at: Utc::now(),
+            };
+            value["sources"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"released":true,"event":event}));
+            let proposal = autonomous_proposal(&value).unwrap();
+            let decision: SocialDecision =
+                serde_json::from_value(proposal["decision"].clone()).unwrap();
+            validate(&decision, &context(&value, None).unwrap()).unwrap();
+            assert!(texts.insert(proposal["text"].as_str().unwrap().to_string()));
+            assert!(
+                proposal["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Simulated demo:")
+            );
+            value["drafts"].as_array_mut().unwrap().insert(0,json!({"id":Uuid::new_v4(),"state":"posted","text":proposal["text"],"decision":proposal["decision"],"topics":proposal["topics"]}));
+        }
+        assert_eq!(texts.len(), 8);
     }
     #[test]
     fn grounded_supa_suggestions_are_explicit_and_bounded() {
