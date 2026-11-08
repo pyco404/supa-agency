@@ -12,13 +12,13 @@ export const sectionArtwork = Object.freeze({
   factory: { title: 'A purpose takes shape', alt: 'Precision manipulators assembling an ivory agent core: a concept, not an active factory.' },
   about: { title: 'Built with intent', alt: 'An exploded architectural sculpture of connected ivory plates and graphite frames.' },
 });
-// Add only reviewed 3–5 second, silent, seamless clips. Null slots deliberately
-// make no network request; the current thumbnail is always the static fallback.
+// Silent four-second source-art loops, loaded only for the visible selected card.
+// The existing thumbnail remains the fallback; other sections stay static.
 export const navigationMotion = Object.freeze({
-  economy: Object.freeze({ webm: null, mp4: null, direction: 'Slow orbital rings and soft reflections' }),
-  social: Object.freeze({ webm: null, mp4: null, direction: 'Delicate pulses through signal strands' }),
-  trading: Object.freeze({ webm: null, mp4: null, direction: 'Slow optical rings and reflection drift' }),
-  factory: Object.freeze({ webm: null, mp4: null, direction: 'Tiny, gentle assembly-arm movements' }),
+  economy: Object.freeze({ webm: '/public/assets/supa-economy-loop.webm', mp4: '/public/assets/supa-economy-loop.mp4', direction: 'Slow orbital rings and soft reflections' }),
+  social: Object.freeze({ webm: '/public/assets/supa-social-loop.webm', mp4: '/public/assets/supa-social-loop.mp4', direction: 'Delicate pulses through signal strands' }),
+  trading: Object.freeze({ webm: '/public/assets/supa-trading-loop.webm', mp4: '/public/assets/supa-trading-loop.mp4', direction: 'Slow optical rings and reflection drift' }),
+  factory: Object.freeze({ webm: '/public/assets/supa-factory-loop.webm', mp4: '/public/assets/supa-factory-loop.mp4', direction: 'Tiny, gentle assembly-arm movements' }),
 });
 export const navigation = [
   ['home','Home'],['agents','Agents'],['intelligence','Intelligence'],['memory','Memory'],['economy','Economy'],['social','Social'],['trading','Trading · planned'],['factory','Factory · planned'],['about','About'],
