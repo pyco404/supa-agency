@@ -267,3 +267,10 @@ body[data-view=projects] .stage{--workspace-gutter:clamp(16px,2vw,32px);--worksp
  .architecture-policy li{display:block}
  .architecture-policy li::before{display:none}
 }
+
+/* Decorative nav media occupies the existing thumbnail slot, never the label. */
+.wheel-media{position:relative;display:block;width:100%;height:calc(100% - 30px);overflow:hidden;pointer-events:none;background:var(--bg)}
+.wheel-item[data-index] .wheel-media img.wheel-thumb,.wheel-motion{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;object-position:50% 46%;padding:0;filter:none}
+.wheel-motion{opacity:0;transition:opacity .2s ease-out}
+.wheel-media[data-playing=true] .wheel-motion{opacity:1}
+@media(prefers-reduced-motion:reduce){.wheel-motion{display:none}}
