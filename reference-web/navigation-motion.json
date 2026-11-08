@@ -1,0 +1,97 @@
+{
+  "status": "local_playback_refresh",
+  "ffmpeg_version": "ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers",
+  "encoding": {
+    "webm": "VP9 CRF32",
+    "mp4": "H.264, no B frames, uniform I/P quantization, faststart; exact QP/preset/keyframes recorded per clip"
+  },
+  "method": "source-derived 2D motion and lighting; no generative video or 3D reconstruction",
+  "candidates": [
+    {
+      "section": "factory",
+      "source": "reference-web/public/assets/supa-factory-960.webp",
+      "source_sha256": "4fd745d0082f6b5a98112e24f25d8619a1becca3135ae0d14764bcc888893c90",
+      "filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X+sin(2*PI*T/4)*(3.5*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-2.8*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))),0,W-1),clip(Y+sin(2*PI*T/4)*(3.2*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-2.2*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))+2.0*exp(-pow((X-238)/57,2)-pow((Y-90)/38,2))),0,H-1))*(1)':g='g(clip(X+sin(2*PI*T/4)*(3.5*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-2.8*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))),0,W-1),clip(Y+sin(2*PI*T/4)*(3.2*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-2.2*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))+2.0*exp(-pow((X-238)/57,2)-pow((Y-90)/38,2))),0,H-1))*(1)':b='b(clip(X+sin(2*PI*T/4)*(3.5*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-2.8*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))),0,W-1),clip(Y+sin(2*PI*T/4)*(3.2*exp(-pow((X-182)/52,2)-pow((Y-37)/65,2))-2.2*exp(-pow((X-390)/70,2)-pow((Y-115)/45,2))+2.0*exp(-pow((X-238)/57,2)-pow((Y-90)/38,2))),0,H-1))*(1)'",
+      "webm_sha256": "8d0617430d6232a38bd17e16175e84e3ab7d1ebd7c8adee4694992b7a58c1bda",
+      "mp4_sha256": "8a0c4a0e2e5b4a5fd641fa253506ca3c250a70926ff710d812dd80815bc5831c",
+      "width": 320,
+      "height": 200,
+      "fps": 20,
+      "seconds": 4,
+      "artwork_replaced": false,
+      "production_enabled": false,
+      "mp4_encoding": [
+        "-qp",
+        "12",
+        "-preset",
+        "slow"
+      ],
+      "encode_scale": "320:200:flags=lanczos"
+    },
+    {
+      "section": "economy",
+      "source": "reference-web/public/assets/supa-economy-960.webp",
+      "source_sha256": "424add80f4c901bd303b456f8cef1c60de098884ca29fd4c7937ebcb436129cb",
+      "filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X-(0.024*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(Y-130),0,W-1),clip(Y+(0.024*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(X-240),0,H-1))*(1+0.07*pow(0.5+0.5*cos(atan2(Y-130,X-240)-2*PI*T/4),8)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))':g='g(clip(X-(0.024*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(Y-130),0,W-1),clip(Y+(0.024*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(X-240),0,H-1))*(1+0.07*pow(0.5+0.5*cos(atan2(Y-130,X-240)-2*PI*T/4),8)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))':b='b(clip(X-(0.024*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(Y-130),0,W-1),clip(Y+(0.024*sin(2*PI*T/4)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))*(X-240),0,H-1))*(1+0.07*pow(0.5+0.5*cos(atan2(Y-130,X-240)-2*PI*T/4),8)*exp(-pow((X-240)/205,2)-pow((Y-130)/155,2)))'",
+      "webm_sha256": "b860724ca4d4ab43ac1389de9d7704ddbc688ef525dca3f4c0764cb68ab6cdb8",
+      "mp4_sha256": "d805ec0257ca159f310b6177ce185b47cbbc4b4e2e72059636c4fdfa0b86eb47",
+      "width": 320,
+      "height": 200,
+      "fps": 20,
+      "seconds": 4,
+      "artwork_replaced": false,
+      "production_enabled": false,
+      "mp4_encoding": [
+        "-qp",
+        "11",
+        "-preset",
+        "veryslow",
+        "-force_key_frames",
+        "0,3.95"
+      ],
+      "encode_scale": "320:200:flags=lanczos"
+    },
+    {
+      "section": "social",
+      "source": "reference-web/public/assets/supa-social-960.webp",
+      "source_sha256": "62381d2b3c5cb327c711c09a4533a316f39fd6eeac256524224ebfaf24f57f13",
+      "filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X,0,W-1),clip(Y,0,H-1))*(1+0.24*pow(0.5+0.5*cos(2*PI*(X/W+Y/H-T/4)),18)*min(1,(abs(g(X+1,Y)-g(X-1,Y))+abs(g(X,Y+1)-g(X,Y-1)))/24))':g='g(clip(X,0,W-1),clip(Y,0,H-1))*(1+0.24*pow(0.5+0.5*cos(2*PI*(X/W+Y/H-T/4)),18)*min(1,(abs(g(X+1,Y)-g(X-1,Y))+abs(g(X,Y+1)-g(X,Y-1)))/24))':b='b(clip(X,0,W-1),clip(Y,0,H-1))*(1+0.24*pow(0.5+0.5*cos(2*PI*(X/W+Y/H-T/4)),18)*min(1,(abs(g(X+1,Y)-g(X-1,Y))+abs(g(X,Y+1)-g(X,Y-1)))/24))'",
+      "webm_sha256": "ce719edc32299ffd6178b3ba30d447b6a93df7e007a3ee3056be1321299db979",
+      "mp4_sha256": "fa3cb6837e7080d158ff3e88e6226377ee72085edac4869975dd32b8f357074d",
+      "width": 320,
+      "height": 200,
+      "fps": 20,
+      "seconds": 4,
+      "artwork_replaced": false,
+      "production_enabled": false,
+      "mp4_encoding": [
+        "-qp",
+        "12",
+        "-preset",
+        "slow"
+      ],
+      "encode_scale": "320:200:flags=lanczos"
+    },
+    {
+      "section": "trading",
+      "source": "reference-web/public/assets/supa-trading-960.webp",
+      "source_sha256": "3f85e02f70dc3db720ef111857f1a1aa3ee536ed2cab528404c36f983383e697",
+      "filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X-(0.036*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(Y-171),0,W-1),clip(Y+(0.036*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(X-240),0,H-1))*(1+0.18*pow(0.5+0.5*cos(atan2(Y-171,X-240)-2*PI*T/4),12)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))':g='g(clip(X-(0.036*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(Y-171),0,W-1),clip(Y+(0.036*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(X-240),0,H-1))*(1+0.18*pow(0.5+0.5*cos(atan2(Y-171,X-240)-2*PI*T/4),12)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))':b='b(clip(X-(0.036*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(Y-171),0,W-1),clip(Y+(0.036*sin(2*PI*T/4)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))*(X-240),0,H-1))*(1+0.18*pow(0.5+0.5*cos(atan2(Y-171,X-240)-2*PI*T/4),12)*exp(-pow((X-240)/66,2)-pow((Y-171)/66,2)))'",
+      "webm_sha256": "d4d95f3d1512ebcaabe8db619107fdd54a65a799ddaa2f040e396fd0d5ebc65d",
+      "mp4_sha256": "fac4840ae222e48bcf80c39399424ecec5a04126c09dd8009ada144b90810f8b",
+      "width": 320,
+      "height": 200,
+      "fps": 20,
+      "seconds": 4,
+      "artwork_replaced": false,
+      "production_enabled": false,
+      "mp4_encoding": [
+        "-qp",
+        "12",
+        "-preset",
+        "slow"
+      ],
+      "encode_scale": "320:200:flags=lanczos"
+    }
+  ]
+}
