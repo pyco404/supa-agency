@@ -1,4 +1,81 @@
 /** Independently authored project wheel; no reference website source is vendored. */
+// One decorative decoder at a time. No source is attached until a visible,
+// selected card is allowed to move; the poster remains underneath throughout.
+export function createCardMedia(entry) {
+  const element = document.createElement("span");
+  element.className = "wheel-media";
+  element.setAttribute("aria-hidden", "true");
+  const image = document.createElement("img");
+  image.className = "wheel-thumb";
+  image.src = entry.thumb;
+  image.alt = "";
+  image.draggable = false;
+  image.decoding = "async";
+  image.loading = "lazy";
+  image.width = 320;
+  image.height = 200;
+  image.referrerPolicy = "no-referrer";
+  element.append(image);
+  // Only reviewed, same-origin public navigation assets belong in this layer.
+  const sources = ["webm", "mp4"].flatMap(format => {
+    const path = entry.media?.[format];
+    return typeof path === "string" && /^\/public\/assets\/supa-(economy|social|trading|factory)-loop\.(webm|mp4)$/.test(path)
+      && path.endsWith("." + format) ? [{ path, type: "video/" + format }] : [];
+  });
+  let video = null, startupTimer = null, failed = false, disposed = false;
+  function release() {
+    clearTimeout(startupTimer);
+    startupTimer = null;
+    if (!video) return;
+    const previous = video;
+    video = null;
+    delete element.dataset.playing;
+    previous.pause();
+    previous.removeAttribute("src");
+    previous.replaceChildren();
+    previous.load();
+    previous.remove();
+  }
+  function setActive(active) {
+    if (!active || disposed) { release(); return; }
+    if (video || failed || !sources.length) return;
+    const current = document.createElement("video");
+    video = current;
+    current.className = "wheel-motion";
+    current.muted = true;
+    current.defaultMuted = true;
+    current.autoplay = true;
+    current.loop = true;
+    current.playsInline = true;
+    current.preload = "none";
+    current.poster = entry.thumb;
+    current.disablePictureInPicture = true;
+    current.setAttribute("aria-hidden", "true");
+    current.tabIndex = -1;
+    const fallback = () => {
+      if (video !== current) return;
+      failed = true;
+      release();
+    };
+    current.addEventListener("error", fallback);
+    current.addEventListener("playing", () => {
+      if (video === current) { clearTimeout(startupTimer); startupTimer = null; element.dataset.playing = "true"; }
+    });
+    let sourceFailures = 0;
+    for (const source of sources) {
+      const node = document.createElement("source");
+      node.src = source.path;
+      node.type = source.type;
+      node.addEventListener("error", () => { if (++sourceFailures === sources.length) fallback(); });
+      current.append(node);
+    }
+    element.append(current);
+    startupTimer = setTimeout(fallback, 8000);
+    current.play()?.catch(fallback); // Autoplay denial also leaves a usable poster.
+  }
+  return { element, setActive, destroy() { disposed = true; release(); } };
+}
+
 export function createWheel({ host, canvas, items, onSelect, reducedMotion = false }) {
   if (!(host instanceof HTMLElement) || !(canvas instanceof HTMLCanvasElement)) {
     throw new TypeError("A wheel host and canvas are required.");
@@ -18,6 +95,7 @@ export function createWheel({ host, canvas, items, onSelect, reducedMotion = fal
   const list = document.createElement("ul");
   list.className = "wheel-list";
   list.setAttribute("role", "presentation");
+  const cardMedia = [];
   const buttons = entries.map((entry, index) => {
     const row = document.createElement("li");
     row.setAttribute("role", "presentation");
@@ -28,17 +106,9 @@ export function createWheel({ host, canvas, items, onSelect, reducedMotion = fal
     button.setAttribute("role", "option");
     button.setAttribute("aria-label", entry.label);
     if (entry.thumb) {
-      const thumbnail = document.createElement("img");
-      thumbnail.className = "wheel-thumb";
-      thumbnail.src = entry.thumb;
-      thumbnail.alt = "";
-      thumbnail.draggable = false;
-      thumbnail.decoding = "async";
-      thumbnail.loading = "lazy";
-      thumbnail.width = 320;
-      thumbnail.height = 320;
-      thumbnail.referrerPolicy = "no-referrer";
-      button.append(thumbnail);
+      const media = createCardMedia(entry);
+      cardMedia[index] = media;
+      button.append(media.element);
     } else if(entry.preview) {
       const thumbnail=document.createElementNS('http://www.w3.org/2000/svg','svg');
       thumbnail.setAttribute('class','wheel-thumb wheel-preview');thumbnail.setAttribute('viewBox','0 0 200 80');thumbnail.setAttribute('aria-hidden','true');
@@ -187,6 +257,7 @@ export function createWheel({ host, canvas, items, onSelect, reducedMotion = fal
       button.tabIndex = index === selected ? 0 : -1;
       button.classList.toggle("is-selected", index === selected);
     });
+    syncCardMedia();
     drawBranch();
   }
 
@@ -226,8 +297,13 @@ export function createWheel({ host, canvas, items, onSelect, reducedMotion = fal
     branchControl.textContent=motion?.matches?'Branch motion reduced':branchPaused?'Play branches':'Pause branches';
     branchControl.setAttribute('aria-pressed',String(!branchPaused&&!motion?.matches));
   }
-  function toggleBranches(){branchPaused=!branchPaused;branchPrevious=null;updateBranchControl();schedule();}
-  function motionChange(){branchPrevious=null;updateBranchControl();schedule();}
+  function syncCardMedia() {
+    cardMedia.forEach((media, index) => media?.setActive(index === selected && branchVisible && buttons[index].style.visibility !== 'hidden'
+      && !branchPaused && !motion?.matches && !document.hidden));
+  }
+  branchControl?.setAttribute('aria-description', 'Also pauses animated navigation card visuals.');
+  function toggleBranches(){branchPaused=!branchPaused;syncCardMedia();branchPrevious=null;updateBranchControl();schedule();}
+  function motionChange(){syncCardMedia();branchPrevious=null;updateBranchControl();schedule();}
 
   function select(index) {
     if (!count || !Number.isFinite(index) || destroyed) return;
@@ -241,6 +317,7 @@ export function createWheel({ host, canvas, items, onSelect, reducedMotion = fal
       button.setAttribute("aria-selected", String(itemIndex === selected));
       button.tabIndex = itemIndex === selected ? 0 : -1;
     });
+    syncCardMedia();
     schedule();
     if (changed) onSelect?.(selected, entries[selected]);
   }
@@ -337,13 +414,14 @@ export function createWheel({ host, canvas, items, onSelect, reducedMotion = fal
 
   function visibility() {
     branchPrevious=null;
+    syncCardMedia();
     if (document.hidden && frame) {
       cancelAnimationFrame(frame);
       frame = 0;
     } else if (!document.hidden) schedule();
   }
 
-  const branchObserver=new IntersectionObserver(entries=>{branchVisible=entries[0].isIntersecting;branchPrevious=null;schedule();});branchObserver.observe(host);
+  const branchObserver=new IntersectionObserver(entries=>{branchVisible=entries[0].isIntersecting;syncCardMedia();branchPrevious=null;schedule();});branchObserver.observe(host);
   branchControl?.addEventListener('click',toggleBranches);updateBranchControl();
   const observer = new ResizeObserver(resize);
   observer.observe(host);
@@ -365,6 +443,7 @@ export function createWheel({ host, canvas, items, onSelect, reducedMotion = fal
     get index() { return selected; },
     destroy() {
       destroyed = true;
+      cardMedia.forEach(media => media?.destroy());
       if (frame) cancelAnimationFrame(frame);
       if (pointer && host.hasPointerCapture(pointer.id)) host.releasePointerCapture(pointer.id);
       pointer = null;
