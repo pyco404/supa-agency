@@ -4,6 +4,7 @@ import {readFileSync,statSync,lstatSync,mkdirSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {navigationMotion} from '../reference-web/platform.js';
 const root=resolve(import.meta.dirname,'..'),directory=resolve(root,'reference-web/motion-candidates'),out=resolve(root,'artifacts/navigation-motion-candidates');mkdirSync(out,{recursive:true});
 const manifest=JSON.parse(readFileSync(resolve(directory,'manifest.json')));
 const hash=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -11,12 +12,19 @@ function run(tool,args){const r=spawnSync(tool,args,{timeout:90000,maxBuffer:500
 function difference(a,b){let sum=0;for(let i=0;i<a.length;i++)sum+=Math.abs(a[i]-b[i]);return sum/a.length;}
 assert.deepEqual(manifest.candidates.map(c=>c.section),['factory','economy','social','trading']);
 const reports=[];
+const enabled=Object.values(navigationMotion).some(media=>media.webm||media.mp4);
 for(const candidate of manifest.candidates){
  assert.equal(candidate.production_enabled,false);assert.equal(candidate.artwork_replaced,false);
  const source=resolve(root,candidate.source);assert.equal(hash(source),candidate.source_sha256);
  const original=run('ffmpeg',['-v','error','-i',source,'-vf','scale=480:480:flags=lanczos,crop=480:300:0:83,format=gray','-frames:v','1','-f','rawvideo','pipe:1']);
  for(const format of ['webm','mp4']){
   const file=resolve(directory,`supa-${candidate.section}-loop.${format}`);assert(!lstatSync(file).isSymbolicLink());assert.equal(hash(file),candidate[format+'_sha256']);
+  if(enabled){
+   const publicPath=`/public/assets/supa-${candidate.section}-loop.${format}`;
+   assert.equal(navigationMotion[candidate.section][format],publicPath,'exact_public_motion_mapping');
+   const published=resolve(root,'reference-web'+publicPath);assert(!lstatSync(published).isSymbolicLink());
+   assert.equal(hash(published),candidate[format+'_sha256'],'public_copy_matches_reviewed_candidate');
+  }
   const probe=JSON.parse(run('ffprobe',['-v','error','-show_streams','-show_format','-of','json',file]));assert.equal(probe.streams.length,1,'silent_video_only');const stream=probe.streams[0];
   assert.equal(stream.codec_type,'video');assert.equal(stream.codec_name,format==='webm'?'vp9':'h264');assert.equal(stream.width,480);assert.equal(stream.height,300);assert.equal(stream.avg_frame_rate,'20/1');assert(Math.abs(Number(probe.format.duration)-4)<.02);
   const bytes=statSync(file).size;assert(bytes<(format==='webm'?250:400)*1024,'candidate_asset_budget');
@@ -33,4 +41,4 @@ for(const candidate of manifest.candidates){
   reports.push({section:candidate.section,format,bytes,width:480,height:300,seconds:Number(probe.format.duration),frames:80,fps:20,silent:true,codec:stream.codec_name,max_adjacent_luma_difference:maxStep,loop_seam_luma_difference:seam,max_source_luma_difference:maxSourceDifference,sha256:hash(file)});
  }
 }
-const result={passed:true,status:'review_candidates_not_enabled',method:manifest.method,metrics_unit:'mean absolute luma difference on 0–255 scale; not a substitute for owner visual review',assets:reports};writeFileSync(resolve(out,'validation.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
+const result={passed:true,status:enabled?'local_public_assets_enabled':'review_candidates_not_enabled',method:manifest.method,metrics_unit:'mean absolute luma difference on 0–255 scale; not a substitute for owner visual review',assets:reports};writeFileSync(resolve(out,'validation.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
