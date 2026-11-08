@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 supa-domain.workspace = true
 supa-persistence.workspace = true
 supa-providers.workspace = true
@@ -20,7 +21,6 @@ axum.workspace = true
 
 
 [dev-dependencies]
-async-trait.workspace = true
 sqlx.workspace = true
 dotenvy.workspace = true
 tempfile.workspace = true
