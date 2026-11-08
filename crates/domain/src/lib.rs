@@ -1,3 +1,4 @@
+pub mod social_review;
 pub mod agent_identity;
 pub mod platform_token;
 pub mod ecosystem_social;
