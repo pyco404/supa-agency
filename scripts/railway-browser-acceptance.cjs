@@ -67,7 +67,7 @@ const status=(path,headers={},expected=401,operation='protected_route')=>observe
    }
    assert.equal(await page.getByRole('link',{name:'Official X / @supa_agency'}).getAttribute('href'),'https://x.com/supa_agency');
    subtest='github_alerts';
-   for(const button of [page.getByRole('button',{name:'github',exact:true}),page.getByRole('button',{name:'Source / github.com/pyco404/supa-agency',exact:true})]){
+   for(const button of [page.getByRole('button',{name:'github',exact:true}),page.getByRole('button',{name:'Source / github.com',exact:true})]){
     const before=page.url(),shown=page.waitForEvent('dialog'),clicked=button.click();const dialog=await shown;
     assert.equal(dialog.type(),'alert');assert.equal(dialog.message(),'GitHub account private, will be open sourced soon.');await dialog.accept();await clicked;assert.equal(page.url(),before);
    }
