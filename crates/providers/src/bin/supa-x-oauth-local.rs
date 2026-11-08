@@ -1,5 +1,6 @@
 //! Owner-terminal only. Default is help; nothing starts OAuth implicitly.
 use std::io::{self, IsTerminal, Write};
+use supa_providers::x_oauth::local::authorization::AuthorizationReceipt;
 use supa_providers::x_oauth::local::{CallbackListener, ConnectionApproval, LocalConnection};
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -25,13 +26,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.is_empty() {
         println!(
-            "Local owner-only OAuth preparation. Use check-listener for a no-credential bind check. Live connect requires separate authorization: connect OWNER_UUID PUBLIC_CLIENT_ID --authorize-one-connection-and-one-budgeted-identity-read"
+            "Local owner-only OAuth preparation. Use check-listener for a no-credential bind check. Live connect requires separate authorization: connect OWNER_UUID PUBLIC_CLIENT_ID RECEIPT_UUID --authorize-one-connection-and-one-budgeted-identity-read"
         );
         return Ok(());
     }
-    if args.len() != 4
+    if args.len() != 5
         || args[0] != "connect"
-        || args[3] != "--authorize-one-connection-and-one-budgeted-identity-read"
+        || args[4] != "--authorize-one-connection-and-one-budgeted-identity-read"
         || !io::stdin().is_terminal()
         || !io::stdout().is_terminal()
         || !io::stderr().is_terminal()
@@ -60,12 +61,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    let approval = ConnectionApproval::owner_approved(
-        Uuid::parse_str(&args[1])?,
-        args[2].clone(),
-        now + 600,
-        None,
-    )?;
+    // Consume administrator-approved evidence before any credential read or consent URL.
+    let owner = Uuid::parse_str(&args[1])?;
+    let receipt = AuthorizationReceipt::consume(Uuid::parse_str(&args[3])?, owner, &args[2])?;
+    let approval = ConnectionApproval::owner_approved(owner, args[2].clone(), now + 600, None)?
+        .with_receipt(receipt)?;
     let connection = LocalConnection::prepare(approval).await?;
     let (sender, receiver) = watch::channel(false);
     let interrupt = tokio::spawn(async move {
@@ -74,7 +74,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
     println!(
         "Open this URL privately in your browser and verify @supa_agency on X's consent screen:\n{}",
-        connection.private_authorize_url()
+        connection.private_authorize_url()?
     );
     let result = connection.finish_authorized(receiver).await;
     interrupt.abort();
