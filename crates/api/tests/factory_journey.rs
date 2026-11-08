@@ -15,6 +15,8 @@ use tower::ServiceExt;
 use uuid::Uuid;
 #[path = "support/avatars.rs"]
 mod avatar_tests;
+#[path = "support/supervised.rs"]
+mod supervised_tests;
 const OWNER: &str = "factory-synthetic-owner-credential-00000000";
 const OTHER: &str = "factory-synthetic-other-credential-00000000";
 const VIEWER: &str = "factory-synthetic-viewer-credential-0000000";
@@ -532,4 +534,15 @@ async fn factory_restart_recovery() {
             .iter()
             .all(|a| a["agent_id"] != json!(id))
     );
+}
+
+#[tokio::test]
+#[ignore = "requires explicit disposable PG18 runner after factory tests"]
+async fn supervised_journey() {
+    supervised_tests::exercise().await;
+}
+#[tokio::test]
+#[ignore = "requires supervised runner PostgreSQL restart"]
+async fn supervised_restart_recovery() {
+    supervised_tests::recovery().await;
 }
