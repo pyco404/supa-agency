@@ -23,7 +23,8 @@ export function proxy(request: NextRequest) {
     const factoryPath = ["/factory/create", "/my-agents", "/api/factory/agents"].includes(request.nextUrl.pathname)
       || /^\/(?:my-agents|api\/factory\/agents)\/[0-9a-f-]{36}$/.test(request.nextUrl.pathname)
       || (process.env.SUPA_AGENT_AVATARS_ENABLED === "true" && /^\/api\/factory\/avatar(?:s|-[a-z]+)(?:\/|$)/.test(request.nextUrl.pathname));
-    const factoryAuth = factoryPath && !!factoryAuthorization(request);
+    const supervisedPath = process.env.SUPA_SUPERVISED_TASKS_ENABLED === "true" && /^\/api\/factory\/(?:agents\/[0-9a-f-]{36}\/tasks|tasks\/[0-9a-f-]{36}(?:\/command)?)$/.test(request.nextUrl.pathname);
+    const factoryAuth = (factoryPath || supervisedPath) && !!factoryAuthorization(request);
     const signInAsset = request.nextUrl.pathname === "/style.css" || /^\/public\/(assets\/[a-z0-9-]+\.svg|fonts\/[a-zA-Z0-9._-]+\.(woff2|ttf|txt))$/.test(request.nextUrl.pathname);
     const factorySignIn = factoryEnabled() && (((request.nextUrl.pathname === "/sign-in" || signInAsset) && request.method === "GET") || (request.nextUrl.pathname === "/api/factory/session" && ["POST", "DELETE"].includes(request.method) && factorySameOrigin(request)));
     const authenticated = operatorAuthorized(authorization) || stagingAuthorized(authorization) || factoryAuth || factorySignIn;
