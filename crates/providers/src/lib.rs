@@ -1,3 +1,4 @@
+pub mod x_oauth;
 pub mod x_review;
 pub mod anthropic;
 mod anthropic_credentials;
