@@ -24,7 +24,7 @@ export async function POST(request: Request, context: { params: Promise<{ path?:
   return Response.json(result.body,{status:result.status,headers:{"Cache-Control":"private, no-store"}});
 }
 const files = new Set(["index.html", "style.css", "app.js", "scene.js", "wheel.js", "platform.js"]);
-const mime: Record<string, string> = { ".html":"text/html; charset=utf-8", ".css":"text/css", ".js":"text/javascript", ".svg":"image/svg+xml", ".webp":"image/webp", ".avif":"image/avif", ".woff2":"font/woff2", ".ttf":"font/ttf", ".txt":"text/plain" };
+const mime: Record<string, string> = { ".webm":"video/webm", ".mp4":"video/mp4", ".html":"text/html; charset=utf-8", ".css":"text/css", ".js":"text/javascript", ".svg":"image/svg+xml", ".webp":"image/webp", ".avif":"image/avif", ".woff2":"font/woff2", ".ttf":"font/ttf", ".txt":"text/plain" };
 const headers = { "Cache-Control":"private, no-store", "X-Content-Type-Options":"nosniff" };
 export async function DELETE(request: Request, context: { params: Promise<{ path?: string[] }> }) {
   const path = "/" + ((await context.params).path ?? []).join("/");
@@ -75,7 +75,8 @@ export async function GET(request: Request, context: { params: Promise<{ path?: 
   if(path==="/home")return new Response(null,{status:308,headers:{...headers,Location:"/"+new URL(request.url).search}});
   const file = [...sections, "/site", "/site/"].includes(path) ? "index.html" : parts.join("/");
   const asset = /^public\/(assets\/[a-z0-9-]+\.svg|fonts\/[a-zA-Z0-9._-]+\.(woff2|ttf|txt))$/.test(file)
-    || /^public\/assets\/supa-(home|agents|intelligence|memory|economy|social|trading|factory|about)-(?:(thumb|480|960)\.webp|960\.avif)$/.test(file);
+    || /^public\/assets\/supa-(home|agents|intelligence|memory|economy|social|trading|factory|about)-(?:(thumb|480|960)\.webp|960\.avif)$/.test(file)
+    || /^public\/assets\/supa-(economy|social|trading|factory)-loop\.(webm|mp4)$/.test(file);
   if (!files.has(file) && !asset) return new Response(await readFile(resolve(process.cwd(),"../reference-web/not-found.html")), {status:404, headers:{...headers,"Content-Type":"text/html; charset=utf-8"}});
   try {
     const root = await realpath(resolve(process.cwd(), "../reference-web"));
