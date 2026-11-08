@@ -171,6 +171,23 @@ pub fn proposal(
     )
 }
 
+/// Autonomous wording is a closed, vetted projection, not arbitrary generated prose.
+/// Only individually released cycle/goal metadata is eligible; private memories,
+/// financial topics, links and model inventions never enter this first policy.
+pub fn autonomous_proposal(context: &Value) -> Result<Value> {
+    let mut released = context.clone();
+    if let Some(sources) = released["sources"].as_array_mut() {
+        sources.retain(|s| matches!(s["event"]["kind"].as_str(), Some("cycle" | "goal")));
+    }
+    for variant in 0..4 {
+        if let Ok(mut value) = proposal(&released, "create", None, None, variant) {
+            value["draft_origin"] = json!("deterministic_autonomous_suggestion");
+            return Ok(value);
+        }
+    }
+    Err(Error::Denied)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +201,23 @@ mod tests {
             created_at: Utc::now(),
         };
         social_context(Personality::default(), &[e], &[], &[])
+    }
+    #[test]
+    fn autonomous_policy_never_uses_unreleased_financial_or_private_prose() {
+        let event = ctx().candidates[0].event.clone();
+        let mut value = json!({"sources":[{"released":true,"event":event}],"drafts":[],"private_memory":"private-lesson-sentinel"});
+        let proposal = autonomous_proposal(&value).unwrap();
+        assert_eq!(
+            proposal["draft_origin"],
+            "deterministic_autonomous_suggestion"
+        );
+        assert!(!proposal.to_string().contains("private-lesson-sentinel"));
+        value["sources"][0]["released"] = json!(false);
+        assert!(autonomous_proposal(&value).is_err());
+        value["sources"][0]["released"] = json!(true);
+        value["sources"][0]["event"]["kind"] = json!("simulated_ledger");
+        value["sources"][0]["event"]["code"] = json!("revenue");
+        assert!(autonomous_proposal(&value).is_err());
     }
     #[test]
     fn grounded_supa_suggestions_are_explicit_and_bounded() {
