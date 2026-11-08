@@ -1,6 +1,6 @@
-//! Offline OAuth preparation for public and confidential clients. No listener,
-//! credential loader or live HTTP transport is installed. Mock-only exchange and
-//! identity orchestration cannot authorize production posting.
+//! Owner-bound OAuth preparation. The local binding is inert until explicitly
+//! invoked by the owner; mock adapters remain synthetic-only. No posting authority.
+pub mod local;
 use crate::x_review::{IDENTITY_ENDPOINT, SCOPES};
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -460,7 +460,10 @@ fn secret_string<'de, D: serde::Deserializer<'de>>(
     <String as serde::Deserialize>::deserialize(d).map(Zeroizing::new)
 }
 fn valid_token(token: &TokenBody) -> bool {
-    token.access_token.starts_with("synthetic-x-access-")
+    token.access_token.starts_with("synthetic-x-access-") && valid_token_metadata(token)
+}
+fn valid_token_metadata(token: &TokenBody) -> bool {
+    !token.access_token.is_empty()
         && token.access_token.len() <= 4096
         && token.access_token.bytes().all(|b| b.is_ascii_graphic())
         && token.token_type == "bearer"
