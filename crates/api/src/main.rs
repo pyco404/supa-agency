@@ -26,6 +26,10 @@ async fn run() -> Result<()> {
     )?;
     let scheduler_enabled = flag("SUPA_API_SCHEDULER_ENABLED", false)?;
     let synthetic_factory = flag("SUPA_SYNTHETIC_FACTORY_ENABLED", false)?;
+    let supervised_tasks = flag("SUPA_SUPERVISED_TASKS_ENABLED", false)?;
+    if supervised_tasks && !synthetic_factory {
+        return Err(Error::Denied);
+    }
     let agent_avatars = flag("SUPA_AGENT_AVATARS_ENABLED", false)?;
     if agent_avatars && !synthetic_factory {
         return Err(Error::Denied);
@@ -175,6 +179,10 @@ async fn run() -> Result<()> {
             .with_synthetic_factory()?;
         if agent_avatars {
             state = state.with_agent_avatars()?;
+        }
+        if supervised_tasks {
+            state.store.verify_supervised_schema().await?;
+            state = state.with_supervised_tasks()?;
         }
         let listener = tokio::net::TcpListener::bind(bind)
             .await
