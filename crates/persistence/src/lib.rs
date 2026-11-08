@@ -1,7 +1,9 @@
 mod access;
 mod avatars;
 mod factory;
+mod supervised;
 pub use factory::FactoryRequest;
+pub use supervised::{SupervisedCommand, SupervisedCreate, SupervisedInput};
 mod controlled;
 mod economy;
 mod ecosystem_reviews;
