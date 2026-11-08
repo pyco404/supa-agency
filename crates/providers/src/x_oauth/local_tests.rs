@@ -44,7 +44,7 @@ async fn callback_fixed_bind_exclusivity_sanitized_page_and_exact_state_consumpt
     .unwrap();
     assert!(matches!(
         LocalConnection::prepare(approval).await,
-        Err(Error::Busy)
+        Err(Error::Denied)
     ));
     let mut p = pending();
     let cb = callback(&p);
@@ -100,6 +100,7 @@ async fn cancelled_or_expired_local_connection_has_no_credential_or_network_oper
             client_id: "synthetic_confidential_client".into(),
             expires: if expired { 1 } else { unix_now().unwrap() + 60 },
             expected_id: None,
+            receipt: None,
         };
         let connection = LocalConnection {
             listener: CallbackListener::bind().await.unwrap(),
@@ -273,7 +274,10 @@ async fn https_wire_basic_pkce_bearer_and_read_only_identity_are_verified() {
     let fixture = TlsFixture::new("success");
     let transport = fixture.transport(true);
     let (_sender, receiver) = watch::channel(false);
-    let (token, identity) = transport.connect(exchange(), &receiver).await.unwrap();
+    let (token, identity) = transport
+        .connect(exchange(), &receiver, None)
+        .await
+        .unwrap();
     assert!(*token.access_token == "fixture-access-token-only");
     assert_eq!(identity.username, "supa_agency");
     assert_eq!(identity.id, "123");
@@ -305,7 +309,10 @@ async fn tls_certificates_hostname_versions_plaintext_and_cancellation_fail_clos
         }
         let (_sender, receiver) = watch::channel(mode == "cancelled");
         assert!(
-            transport.connect(exchange(), &receiver).await.is_err(),
+            transport
+                .connect(exchange(), &receiver, None)
+                .await
+                .is_err(),
             "{mode}"
         );
         assert_eq!(fixture.calls(), 0);
@@ -330,7 +337,10 @@ async fn https_status_redirects_scopes_partial_errors_limits_and_ambiguous_trans
         let transport = fixture.transport(true);
         let (_sender, receiver) = watch::channel(false);
         assert!(
-            transport.connect(exchange(), &receiver).await.is_err(),
+            transport
+                .connect(exchange(), &receiver, None)
+                .await
+                .is_err(),
             "{mode}"
         );
         assert_eq!(fixture.calls(), calls, "{mode}");
