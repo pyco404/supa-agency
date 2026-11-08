@@ -1,3 +1,5 @@
+mod social_autonomy;
+pub use social_autonomy::AutonomousSocialGrant;
 mod social_review;
 pub use social_review::SocialReviewCommand;
 mod access;
