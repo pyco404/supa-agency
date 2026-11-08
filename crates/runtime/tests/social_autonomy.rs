@@ -265,6 +265,34 @@ async fn journey() {
         "not_due"
     );
     assert_eq!(lost.calls.lock().unwrap().len(), 2);
+    assert!(
+        s.autonomous_social_command_mock(id(1), "resume", json!({"grant_id":g}))
+            .await
+            .is_err(),
+        "uncertainty cannot be bypassed by resume"
+    );
+    let replacement = AutonomousSocialGrant {
+        grant_id: id(102),
+        account: json!({"id":"1","username":"supa_agency","mode":"mock"}),
+        confirmed: true,
+        scope: "original_text_released_metadata_only".into(),
+        expires_at: Utc::now() + Duration::days(1),
+        max_posts: 6,
+        interval_seconds: 14400,
+        budget_microusd: 250000,
+    };
+    s.autonomous_social_authorize_mock(id(1), &replacement)
+        .await
+        .unwrap();
+    assert!(
+        s.autonomous_social_command_mock(id(1), "resume", json!({"grant_id":id(102)}))
+            .await
+            .is_err()
+    );
+    // This synthetic provider fixture alone can attest that no remote post exists.
+    // There is no production reconcile endpoint or automatic uncertainty clearing.
+    sqlx::query("UPDATE social_autonomy.attempts SET state='failed',receipt=$2 WHERE id=$1")
+        .bind(id(1003)).bind(json!({"mode":"mock","state":"failed","category":"fixture_independent_no_post_confirmed"})).execute(a.pool()).await.unwrap();
     command(&s, "stop", g).await;
     assert!(
         s.autonomous_social_command_mock(id(1), "resume", json!({"grant_id":g}))
@@ -526,6 +554,7 @@ async fn boundaries() {
     // Release revocation invalidates dispatch, while the slot/budget remains reserved.
     sqlx::query("INSERT INTO social_review.releases(agent_id,event_id,actor,snapshot_sha256,released) SELECT agent_id,event_id,actor,snapshot_sha256,false FROM social_review.releases WHERE event_id=$1 ORDER BY id DESC LIMIT 1").bind(id(5013)).execute(a.pool()).await.unwrap();
     assert!(s.autonomous_social_command_mock(id(2),"guard",json!({"grant_id":id(502),"attempt_id":id(5201),"account":g.account,"text_sha256":proposal["text_sha256"]})).await.is_err());
+    s.autonomous_social_command_mock(id(2),"finish",json!({"grant_id":id(502),"attempt_id":id(5201),"receipt":{"mode":"mock","state":"failed","category":"evidence_revoked_before_dispatch"}})).await.unwrap();
     s.autonomous_social_command_mock(id(2), "revoke", json!({"grant_id":id(502)}))
         .await
         .unwrap();
@@ -572,6 +601,8 @@ async fn boundaries() {
         .await
         .unwrap();
     assert_eq!(first["fresh"], true);
+    s.autonomous_social_command_mock(id(2),"finish",json!({"grant_id":id(503),"attempt_id":id(5400),"receipt":{"mode":"mock","state":"failed","category":"budget_fixture_no_dispatch"}})).await.unwrap();
+    sqlx::query("UPDATE social_autonomy.attempts SET created_at=clock_timestamp()-interval '5 hours' WHERE id=$1").bind(id(5400)).execute(a.pool()).await.unwrap();
     sqlx::query("UPDATE social_autonomy.grants SET next_at=clock_timestamp()-interval '1 second' WHERE id=$1").bind(id(503)).execute(a.pool()).await.unwrap();
     let read = s
         .autonomous_social_command_mock(id(2), "read", json!({"grant_id":id(503)}))
