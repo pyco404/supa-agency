@@ -3,6 +3,7 @@ pub mod economy;
 pub mod evaluation;
 pub mod health;
 pub mod live_work;
+pub mod social_autonomy;
 pub mod supervised;
 pub mod wallet;
 use std::{sync::Arc, time::Duration};
