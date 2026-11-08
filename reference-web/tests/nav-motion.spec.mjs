@@ -17,7 +17,9 @@ async function preview(page,{clips=true,brokenWebm=false,brokenAll=false}={}){
   if(/-loop\.(webm|mp4)$/.test(url.pathname)){
    observed.clips.push(url.pathname);
    if(brokenAll||(brokenWebm&&url.pathname.endsWith('.webm')))return route.fulfill({status:404,body:''});
-   const format=url.pathname.split('.').pop();return route.fulfill({contentType:'video/'+format,body:await readFile(resolve(import.meta.dirname,'fixtures/nav-loop.'+format))});
+   const format=url.pathname.split('.').pop();
+   const file=process.env.SUPA_NAV_MOTION_CANDIDATES==='1' ? resolve(import.meta.dirname,'../motion-candidates',url.pathname.split('/').pop()) : resolve(import.meta.dirname,'fixtures/nav-loop.'+format);
+   return route.fulfill({contentType:'video/'+format,body:await readFile(file)});
   }
   if(['/', '/home','/agents','/intelligence','/memory','/economy','/social','/trading','/factory','/about'].includes(url.pathname)){
    const response=await route.fetch({url:base+(url.pathname==='/home'?'/':url.pathname)});
@@ -29,6 +31,7 @@ async function preview(page,{clips=true,brokenWebm=false,brokenAll=false}={}){
 async function open(page,path='/economy'){
  await page.goto(path);await expect(page.locator('html')).toHaveAttribute('data-ready','true');
  if(page.viewportSize().width<=700)await page.locator('.tabline').click();
+ await expect(page.locator('.wheel')).toHaveAttribute('data-carousel-state','settled');
 }
 const video=page=>page.locator('.wheel-motion');
 test.afterEach(async({page})=>{await page.unrouteAll({behavior:'wait'});});
@@ -38,8 +41,7 @@ test('only the selected visible card loops, preserves geometry and releases inac
  await expect(video(page)).toHaveCount(0);expect(observed.clips).toEqual([]);
  await page.locator('.wheel').focus();await page.keyboard.press('End'); // About stays static.
  await expect(video(page)).toHaveCount(0);
- await page.goto('/economy');await expect(page.locator('html')).toHaveAttribute('data-ready','true');
- if(page.viewportSize().width<=700)await page.locator('.tabline').click();
+ await open(page,'/economy');
  await expect(video(page)).toHaveCount(1);await expect(page.locator('.wheel-media[data-playing=true]')).toHaveCount(1);
  const geometry=await video(page).evaluate(v=>{const r=v.getBoundingClientRect(),image=v.parentElement.querySelector('img'),i=image.getBoundingClientRect();return {muted:v.muted,inline:v.playsInline,loop:v.loop,fit:getComputedStyle(v).objectFit,width:v.clientWidth,height:v.clientHeight,match:Math.abs(r.width-i.width)<1&&Math.abs(r.height-i.height)<1,clipped:getComputedStyle(v.parentElement).overflow,tab:v.tabIndex};});
  expect(geometry).toMatchObject({muted:true,inline:true,loop:true,fit:'cover',match:true,clipped:'hidden',tab:-1});expect(geometry.width/geometry.height).toBeGreaterThan(1.25);
@@ -99,4 +101,20 @@ test('autoplay rejection leaves the static fallback without repeated attempts',a
  await page.addInitScript(()=>{HTMLMediaElement.prototype.play=function(){return Promise.reject(new DOMException('Autoplay blocked','NotAllowedError'));};});
  const observed=await preview(page);await open(page);await expect(video(page)).toHaveCount(0);
  await expect(page.locator('.wheel-item[aria-selected=true] img')).toBeVisible();expect(observed.errors).toEqual([]);
+});
+
+test('all four review candidates play through the real card layer without enabling production slots',async({page},info)=>{
+ test.skip(process.env.SUPA_NAV_MOTION_CANDIDATES!=='1','Requires explicitly selected local review candidates');
+ await page.emulateMedia({reducedMotion:'no-preference'});const observed=await preview(page),metrics=[];
+ for(const section of ['factory','economy','social','trading']){
+  await open(page,'/'+section);await expect(video(page)).toHaveCount(1);await expect(page.locator('.wheel-media[data-playing=true]')).toHaveCount(1);
+  await expect.poll(()=>video(page).evaluate(v=>v.currentTime)).toBeGreaterThan(.3);
+  const sample=async()=>video(page).evaluate(v=>{const q=v.getVideoPlaybackQuality();return {width:v.videoWidth,height:v.videoHeight,seconds:v.duration,decoded:q.totalVideoFrames,dropped:q.droppedVideoFrames};});
+  const startup=await sample();await page.waitForTimeout(2000);const quality=await sample();
+  expect(quality.width).toBe(480);expect(quality.height).toBe(300);expect(quality.seconds).toBeCloseTo(4,1);
+  const decoded=quality.decoded-startup.decoded,dropped=quality.dropped-startup.dropped;
+  expect(decoded).toBeGreaterThanOrEqual(20);expect(dropped/decoded).toBeLessThan(.2);metrics.push({section,...quality,startup_decoded:startup.decoded,startup_dropped:startup.dropped,sample_decoded:decoded,sample_dropped:dropped});
+  await page.screenshot({path:resolve(import.meta.dirname,'../../artifacts/navigation-motion-candidates',info.project.name+'-'+section+'.png')});
+ }
+ expect(observed.private).toEqual([]);expect(observed.errors).toEqual([]);await info.attach('candidate-playback-quality',{body:JSON.stringify(metrics),contentType:'application/json'});
 });
