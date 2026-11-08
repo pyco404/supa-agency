@@ -46,7 +46,7 @@ test('GitHub labels show a private-source notice without opening a repository',a
  await ready(page,'/about');
  const start=page.url();let popups=0;context.on('page',()=>popups++);
  const github=page.getByRole('button',{name:'github',exact:true});
- const source=page.getByRole('button',{name:'Source / github.com/pyco404/supa-agency',exact:true});
+ const source=page.getByRole('button',{name:'Source / github.com',exact:true});
  for(const button of [github,source]){
   const shown=page.waitForEvent('dialog');const clicked=button.click();const dialog=await shown;
   expect(dialog.type()).toBe('alert');expect(dialog.message()).toBe('GitHub account private, will be open sourced soon.');await dialog.accept();await clicked;expect(page.url()).toBe(start);
