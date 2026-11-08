@@ -151,7 +151,7 @@ body:before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;bac
 @media(prefers-reduced-motion:reduce){.intro-mascot{animation:none;transform:none}.pane.is-changing .buffer{animation:none}}
 
 /* Immediate text access stays in the existing identity toolbar, without another row. */
-.workspace-controls .skip-typing{flex:0 0 auto;max-width:90px;min-height:44px;padding:8px;color:var(--ink);line-height:1.3;text-underline-offset:3px}
+.workspace-controls .skip-typing{flex:0 0 auto;white-space:nowrap;min-height:44px;padding:8px;color:var(--ink);line-height:1.3;text-underline-offset:3px}
 @media(max-width:700px){.workspace-controls .skip-typing{font-size:9px}}
 @media(hover:hover){.agent-trigger:not(:disabled):hover{border-color:var(--green)}.agent-option:hover{background:#141816}}
 
