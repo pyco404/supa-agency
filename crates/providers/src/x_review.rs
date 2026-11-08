@@ -97,6 +97,7 @@ impl<T: MockXTransport> MockXAdapter<T> {
         now_unix: u64,
         guard: &dyn MockDispatchGuard,
     ) -> XReceipt {
+        let began = std::time::Instant::now();
         if self.attempted.swap(true, Ordering::SeqCst) {
             return XReceipt::outcome("failed", "attempt_already_consumed");
         }
@@ -125,17 +126,25 @@ impl<T: MockXTransport> MockXAdapter<T> {
             Ok(v) => v,
             Err(_) => return XReceipt::outcome("failed", "identity_invalid"),
         };
-        if identity["data"]["id"] != self.account.id
+        if identity.get("errors").is_some()
+            || identity["data"]["id"] != self.account.id
             || identity["data"]["username"] != self.account.username
         {
             return XReceipt::outcome("failed", "account_mismatch");
         }
-        if guard
-            .authorize_exact(text_sha256, &self.account)
-            .await
-            .is_err()
-        {
-            return XReceipt::outcome("failed", "approval_revoked");
+        if !matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                guard.authorize_exact(text_sha256, &self.account)
+            )
+            .await,
+            Ok(Ok(()))
+        ) {
+            return XReceipt::outcome("failed", "approval_revoked_or_unavailable");
+        }
+        // Identity/guard observations cannot extend the approved lifetime.
+        if now_unix.saturating_add(began.elapsed().as_secs()) >= self.expires_unix {
+            return XReceipt::outcome("failed", "authorization_expired_before_post");
         }
         let response = match tokio::time::timeout(
             std::time::Duration::from_secs(3),
@@ -154,7 +163,9 @@ impl<T: MockXTransport> MockXAdapter<T> {
             200..=299 if response.body.len() <= 16384 => {
                 if let Ok(value) = serde_json::from_slice::<Value>(&response.body) {
                     if let Some(id) = value["data"]["id"].as_str() {
-                        if !id.is_empty()
+                        if value.get("errors").is_none()
+                            && value["data"]["text"] == text
+                            && !id.is_empty()
                             && id.len() <= 24
                             && id.bytes().all(|b| b.is_ascii_digit())
                         {
@@ -203,7 +214,7 @@ mod tests {
             assert_eq!(credential, "mock-x-credential-no-real-account");
             self.calls.lock().unwrap().push(path.into());
             if path == "/2/users/me" {
-                return Ok(MockResponse{status:200,body:json!({"data":{"id":if self.fault=="account"{"2"}else{"1"},"username":"supa_agency"}}).to_string().into_bytes(),rate_limit_reset:None});
+                return Ok(MockResponse{status:if self.fault=="auth"{401}else{200},body:json!({"data":{"id":if self.fault=="account"{"2"}else{"1"},"username":"supa_agency"}}).to_string().into_bytes(),rate_limit_reset:None});
             }
             assert_eq!(path, "/2/tweets");
             assert_eq!(body.unwrap(), json!({"text":"A bounded observation."}));
@@ -216,10 +227,12 @@ mod tests {
                     "http" => 503,
                     _ => 201,
                 },
-                body: if self.fault == "json" {
+                body: if self.fault == "partial_error" {
+                    json!({"data":{"id":"123","text":"A bounded observation."},"errors":[{"detail":"untrusted raw provider error"}]}).to_string().into_bytes()
+                } else if self.fault == "json" {
                     b"private raw response".to_vec()
                 } else {
-                    br#"{"data":{"id":"123"}}"#.to_vec()
+                    json!({"data":{"id":"123","text":if self.fault=="text_mismatch"{"Unapproved text"}else{"A bounded observation."}}}).to_string().into_bytes()
                 },
                 rate_limit_reset: Some(123456),
             })
@@ -237,6 +250,9 @@ mod tests {
         for fault in [
             "none",
             "account",
+            "auth",
+            "text_mismatch",
+            "partial_error",
             "expired",
             "revoked",
             "transport",
@@ -277,7 +293,8 @@ mod tests {
                 receipt.state,
                 match fault {
                     "none" => "posted",
-                    "transport" | "http" | "json" => "uncertain",
+                    "transport" | "http" | "json" | "text_mismatch" | "partial_error" =>
+                        "uncertain",
                     _ => "failed",
                 }
             );
@@ -286,7 +303,7 @@ mod tests {
                 count,
                 if fault == "expired" {
                     0
-                } else if matches!(fault, "account" | "revoked") {
+                } else if matches!(fault, "account" | "revoked" | "auth") {
                     1
                 } else {
                     2
@@ -351,7 +368,7 @@ mod tests {
                     r#"{"data":{"id":"1","username":"supa_agency"}}"#
                 } else {
                     assert!(raw.ends_with(r#"{"text":"A bounded observation."}"#));
-                    r#"{"data":{"id":"123"}}"#
+                    r#"{"data":{"id":"123","text":"A bounded observation."}}"#
                 };
                 socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
             }
@@ -477,5 +494,79 @@ mod tests {
                 .category,
             "attempt_already_consumed"
         );
+    }
+    #[tokio::test]
+    async fn slow_observations_never_extend_expiry_or_authorize_post() {
+        struct Observation {
+            calls: Arc<Mutex<Vec<String>>>,
+            slow_identity: bool,
+        }
+        #[async_trait]
+        impl MockXTransport for Observation {
+            async fn exchange(
+                &self,
+                path: &str,
+                _: Option<Value>,
+                _: &str,
+            ) -> Result<MockResponse> {
+                self.calls.lock().unwrap().push(path.into());
+                assert_eq!(
+                    path, "/2/users/me",
+                    "no POST permitted after slow observation"
+                );
+                if self.slow_identity {
+                    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+                }
+                Ok(MockResponse {
+                    status: 200,
+                    body: br#"{"data":{"id":"1","username":"supa_agency"}}"#.to_vec(),
+                    rate_limit_reset: None,
+                })
+            }
+        }
+        struct StalledGuard;
+        #[async_trait]
+        impl MockDispatchGuard for StalledGuard {
+            async fn authorize_exact(&self, _: &str, _: &MockAccount) -> Result<()> {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                Ok(())
+            }
+        }
+        for slow_identity in [false, true] {
+            let calls = Arc::new(Mutex::new(vec![]));
+            let a = MockXAdapter::new(
+                Observation {
+                    calls: calls.clone(),
+                    slow_identity,
+                },
+                "mock-x-credential-no-real-account".into(),
+                MockAccount {
+                    id: "1".into(),
+                    username: "supa_agency".into(),
+                    mode: "mock".into(),
+                },
+                if slow_identity { 2 } else { 100 },
+            )
+            .unwrap();
+            let text = "A bounded observation.";
+            let hash = ring::digest::digest(&ring::digest::SHA256, text.as_bytes())
+                .as_ref()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            let r = if slow_identity {
+                a.execute_reserved_once(text, &hash, 1, &Guard(true)).await
+            } else {
+                a.execute_reserved_once(text, &hash, 1, &StalledGuard).await
+            };
+            assert_eq!(r.state, "failed");
+            assert_eq!(calls.lock().unwrap().len(), 1);
+            assert_eq!(
+                a.execute_reserved_once(text, &hash, 1, &Guard(true))
+                    .await
+                    .category,
+                "attempt_already_consumed"
+            );
+        }
     }
 }
