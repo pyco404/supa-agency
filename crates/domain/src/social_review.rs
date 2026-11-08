@@ -8,8 +8,23 @@ pub const X_HANDLE: &str = "supa_agency";
 pub fn safe_post(text: &str) -> Result<()> {
     clean_text(text, 280)?;
     let lower = text.to_lowercase();
-    if text.len() > 280
-        || text.chars().any(char::is_control)
+    // X can auto-link bare domains even without a URL scheme or slash. Keep
+    // the first-post text-only cost/category policy conservative and explicit.
+    let bare_domain = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '.' || c == '-'))
+        .any(|token| {
+            let token = token.trim_matches('.');
+            let labels: Vec<_> = token.split('.').collect();
+            labels.len() > 1
+                && labels.last().is_some_and(|label| {
+                    label.chars().count() >= 2 && label.chars().all(char::is_alphabetic)
+                })
+                && labels.iter().all(|label| {
+                    !label.is_empty() && label.chars().all(|c| c.is_alphanumeric() || c == '-')
+                })
+        });
+    if text.len() > 280 || bare_domain
+        || text.chars().any(|c| c.is_control()||matches!(c,'\u{200b}'..='\u{200f}'|'\u{202a}'..='\u{202e}'|'\u{2060}'..='\u{206f}'|'\u{feff}'|'\u{3002}'|'\u{ff0e}'|'\u{ff61}'))
         || text.contains(['@', '#', '/', '\\', '<', '>'])
         || [
             "sk-",
@@ -193,6 +208,11 @@ mod tests {
             "<script>",
             "private memory",
             "guaranteed returns",
+            "example.com",
+            "Visit(example.com)",
+            "www.example.com.",
+            "example。com",
+            "hidden\u{200b}format",
         ] {
             assert!(safe_post(text).is_err());
         }
