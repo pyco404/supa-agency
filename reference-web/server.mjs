@@ -16,7 +16,7 @@ const media = new Map([
   [".js", "text/javascript; charset=utf-8"], [".json", "application/json; charset=utf-8"], [".woff2", "font/woff2"],
   [".woff", "font/woff"], [".ttf", "font/ttf"], [".png", "image/png"],
   [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".webp", "image/webp"],
-  [".avif", "image/avif"], [".svg", "image/svg+xml"], [".ico", "image/x-icon"],
+  [".webm", "video/webm"], [".mp4", "video/mp4"], [".avif", "image/avif"], [".svg", "image/svg+xml"], [".ico", "image/x-icon"],
 ]);
 const publicExtensions = new Set([".woff2", ".woff", ".ttf", ".png", ".jpg", ".jpeg", ".webp", ".avif", ".svg", ".ico"]);
 
@@ -29,7 +29,7 @@ createServer(async (request, response) => {
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("Referrer-Policy", "no-referrer");
   response.setHeader("Cache-Control", "no-store");
-  response.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+  response.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
   if (request.method !== "GET" && request.method !== "HEAD" && !(request.method === 'POST' && (isEconomicPath(request.url)||['/api/autonomy','/api/launch'].includes(request.url)||/^\/api\/agents\/[0-9a-f-]{36}\/(?:schedule|live-work|live(?:\/[0-9a-f-]{36}\/approval)?)$/i.test(request.url)))) {
     response.setHeader("Allow", "GET, HEAD");
     return finish(response, 405, "Operation not permitted");
@@ -76,7 +76,7 @@ createServer(async (request, response) => {
   const canonical = path === '/home' || path === '/home/' ? '/' : navigation.find(item=>item.path!=='/' && path===item.path+'/')?.path;
   if(canonical){response.writeHead(308,{Location:canonical+new URL(request.url,'http://localhost').search});return response.end();}
   const file = navigation.some(item=>item.path===path) || path === "/" || path === "/site" || path === "/site/" ? "index.html" : path.slice(1);
-  const isPublic = file.startsWith("public/") && file.split("/").every(part => part && !part.startsWith(".")) && (publicExtensions.has(extname(file)) || file === "public/fonts/OFL.txt");
+  const isPublic = file.startsWith("public/") && file.split("/").every(part => part && !part.startsWith(".")) && (publicExtensions.has(extname(file)) || /^public\/assets\/supa-(economy|social|trading|factory)-loop\.(webm|mp4)$/.test(file) || file === "public/fonts/OFL.txt");
   if (!appFiles.has(file) && !isPublic) {
     response.writeHead(404,{'Content-Type':'text/html; charset=utf-8'});
     return response.end(request.method==='HEAD'?undefined:await readFile(resolve(root,'not-found.html')));
