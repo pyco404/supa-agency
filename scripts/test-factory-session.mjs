@@ -7,6 +7,10 @@ const auth=new URL('../web/src/lib/auth.ts',import.meta.url).href;
 const source=await readFile(new URL('../web/src/lib/factory-session.ts',import.meta.url),'utf8');
 const moduleUrl='data:text/javascript,'+encodeURIComponent(ts.transpileModule(source.replace('"./auth"',JSON.stringify(auth)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
 const session=await import(moduleUrl);
+const taskSource=await readFile(new URL('../web/src/lib/supervised.ts',import.meta.url),'utf8');
+const taskZod=new URL('../web/node_modules/zod/index.js',import.meta.url).href;
+const taskModuleUrl='data:text/javascript,'+encodeURIComponent(ts.transpileModule(taskSource.replace("'zod'",JSON.stringify(taskZod)).replace("'./factory-session'",JSON.stringify(moduleUrl)).replace("'./auth'",JSON.stringify(auth)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
+
 const nextServer=new URL('../web/node_modules/next/server.js',import.meta.url).href;
 const {NextRequest}=await import(nextServer);
 const proxySource=await readFile(new URL('../web/src/proxy.ts',import.meta.url),'utf8');
@@ -66,7 +70,7 @@ test('avatar-free detail adapter forwards one validated ID and rejects writes or
  const stub='data:text/javascript,'+encodeURIComponent('export const avatarsEnabled=()=>false; export const avatarRoute=()=>{throw Error("unexpected_avatar_route")};');
  const src=await readFile(new URL('../web/src/lib/factory.ts',import.meta.url),'utf8');
  const zod=new URL('../web/node_modules/zod/index.js',import.meta.url).href;
- const {factoryRoute}=await import('data:text/javascript,'+encodeURIComponent(ts.transpileModule(src.replace('"zod"',JSON.stringify(zod)).replace('"./factory-session"',JSON.stringify(moduleUrl)).replace('"./auth"',JSON.stringify(auth)).replace('"./avatars"',JSON.stringify(stub)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText));
+ const {factoryRoute}=await import('data:text/javascript,'+encodeURIComponent(ts.transpileModule(src.replace('"./supervised"',JSON.stringify(taskModuleUrl)).replace('"zod"',JSON.stringify(zod)).replace('"./factory-session"',JSON.stringify(moduleUrl)).replace('"./auth"',JSON.stringify(auth)).replace('"./avatars"',JSON.stringify(stub)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText));
  const id='11111111-1111-4111-8111-111111111111',path='/api/factory/agents/'+id;
  const configuration={request_id:id,name:'Synthetic assistant',description:'Disposable fixture',purpose:'Review synthetic reports',personality:{voice:'Curious',traits:[]},goals:['Review a synthetic report'],requested_capabilities:[],autonomy:'disabled',spending_limit_microusd:0,private_consent:true};
  const agent={agent_id:id,configuration,status:'paused',qualification:'pending_review',public:false,enabled_capabilities:[],execution_enabled:false,token_mint:null};
@@ -85,4 +89,21 @@ test('avatar-free detail adapter forwards one validated ID and rejects writes or
   globalThis.fetch=async()=>Response.json({...agent,execution_enabled:true});
   assert.equal((await factoryRoute(request(),path)).status,502,'invalid backend state fails closed');
  }finally{globalThis.fetch=originalFetch;if(originalBackend===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=originalBackend;}
+});
+
+test('supervised adapter enforces feature, session, origin, exact command and backend contracts',async()=>{
+ const {supervisedRoute}=await import(taskModuleUrl),id='11111111-1111-4111-8111-111111111111',path='/api/factory/tasks/'+id+'/command';
+ const cookie=session.issueFactorySession('synthetic',password),oldFetch=globalThis.fetch,oldUrl=process.env.SUPA_BACKEND_URL;
+ let calls=0;globalThis.fetch=async()=>{calls++;return Response.json({invalid_private_backend_shape:true});};process.env.SUPA_BACKEND_URL='http://127.0.0.1:3351';
+ const command={request_id:id,operation:'start',expected_revision:0,input_sha256:'0'.repeat(64),confirmed:true};
+ const make=(body=command,origin='http://127.0.0.1:3339',auth=true)=>new Request('http://127.0.0.1:3339'+path,{method:'POST',headers:{host:'127.0.0.1:3339',origin,'Content-Type':'application/json',...(auth?{cookie:'supa_factory_session='+cookie}:{})},body:JSON.stringify(body)});
+ try{
+  delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;assert.equal((await supervisedRoute(make(),path)).status,403);
+  process.env.SUPA_SUPERVISED_TASKS_ENABLED='true';assert.equal((await supervisedRoute(make(command,undefined,false),path)).status,401);
+  assert.equal((await supervisedRoute(make(command,'https://untrusted.invalid'),path)).status,403);
+  for(const extra of [{creator_id:id},{payload:{result:'forged'}},{operation:'trade'}])assert.equal((await supervisedRoute(make({...command,...extra}),path)).status,400);
+  assert.equal(calls,0);assert.equal((await supervisedRoute(make(),path)).status,502);assert.equal(calls,1);
+  assert.equal(proxy(new NextRequest('http://127.0.0.1:3339'+path,{headers:{host:'127.0.0.1:3339',cookie:'supa_factory_session='+cookie}})).status,200);
+  assert.equal(proxy(new NextRequest('http://127.0.0.1:3339'+path,{headers:{host:'127.0.0.1:3339'}})).status,401);
+ }finally{delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
 });
