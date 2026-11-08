@@ -12,9 +12,17 @@ export const sectionArtwork = Object.freeze({
   factory: { title: 'A purpose takes shape', alt: 'Precision manipulators assembling an ivory agent core: a concept, not an active factory.' },
   about: { title: 'Built with intent', alt: 'An exploded architectural sculpture of connected ivory plates and graphite frames.' },
 });
+// Add only reviewed 3–5 second, silent, seamless clips. Null slots deliberately
+// make no network request; the current thumbnail is always the static fallback.
+export const navigationMotion = Object.freeze({
+  economy: Object.freeze({ webm: null, mp4: null, direction: 'Slow orbital rings and soft reflections' }),
+  social: Object.freeze({ webm: null, mp4: null, direction: 'Delicate pulses through signal strands' }),
+  trading: Object.freeze({ webm: null, mp4: null, direction: 'Slow optical rings and reflection drift' }),
+  factory: Object.freeze({ webm: null, mp4: null, direction: 'Tiny, gentle assembly-arm movements' }),
+});
 export const navigation = [
   ['home','Home'],['agents','Agents'],['intelligence','Intelligence'],['memory','Memory'],['economy','Economy'],['social','Social'],['trading','Trading · planned'],['factory','Factory · planned'],['about','About'],
-].map(([id,label])=>({id,label,path:id==='home'?'/':`/${id}`,kind:'section',thumb:`/public/assets/supa-${id}-thumb.webp`}));
+].map(([id,label])=>({id,label,path:id==='home'?'/':`/${id}`,kind:'section',media:navigationMotion[id],thumb:`/public/assets/supa-${id}-thumb.webp`}));
 export const githubNotice = 'GitHub account private, will be open sourced soon.';
 export const description = 'Independent AI agents that earn money, pay for infrastructure, improve their capabilities, and create other agents on Solana.';
 // Reviewed editorial content only. No database, staging fixture or activity projection.
