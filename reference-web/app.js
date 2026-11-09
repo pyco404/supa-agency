@@ -27,12 +27,12 @@ function animateArtwork(picture,id,poster){
   const media=createCardMedia({thumb:poster,media:pageArtworkMotion[id]});
   media.element.classList.add('section-motion-media');picture.append(media.element);
   let visible=false;
-  const item={sync(){media.setActive(visible&&picture.isConnected&&!reduced.matches&&!document.hidden&&document.body.dataset.view==='projects'&&!$('.pane').inert);},destroy(){observer.disconnect();media.destroy();}};
+  const item={sync(motionReduced=reduced.matches){media.setActive(visible&&picture.isConnected&&!motionReduced&&!document.hidden&&document.body.dataset.view==='projects'&&!$('.pane').inert);},destroy(){observer.disconnect();media.destroy();}};
   const observer=new IntersectionObserver(entries=>{visible=entries.some(entry=>entry.isIntersecting);item.sync();},{threshold:0});
   artworkMedia.add(item);observer.observe(picture);
 }
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-reduced.addEventListener('change', event => { root.dataset.motion=event.matches?'still':'running';syncArtworkMedia();if(event.matches)revealTyping?.(); });
+reduced.addEventListener('change', event => { root.dataset.motion=event.matches?'still':'running';for(const item of artworkMedia)item.sync(event.matches);if(event.matches)revealTyping?.(); });
 root.dataset.motion = reduced.matches?'still':'running';
 document.addEventListener('visibilitychange',syncArtworkMedia);
 const node = (tag,className,text) => { const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=String(text);return el; };
