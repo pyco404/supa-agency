@@ -137,6 +137,19 @@ def enrollment(keyring, read=getpass.getpass, *, owner=None, client=None, author
     return {'stored': True, 'custody': LABEL, 'connected': False, 'publishing_enabled': False}
 
 
+def dotenv_config():
+    # Reuse the literal parser and owned-0600 checks; never source shell code.
+    import importlib.util
+    path = Path(__file__).resolve().with_name('local-config.py')
+    info = path.lstat()
+    require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o022)
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location('x_private_local_config', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def oauth1_bundle(body):
     require(isinstance(body, dict) and set(body) == set(OAUTH1_FIELDS))
     for value in body.values():
@@ -163,6 +176,10 @@ def ipc(operation, keyring, body):
     require(isinstance(body, dict))
     client, owner = body.get('client_id'), body.get('owner')
     identity(client, owner)
+    if operation == 'backend-read-oauth1-env':
+        require(set(body) == {'client_id', 'owner'} and owner == LOCAL_OWNER and client == OAUTH1_NAMESPACE)
+        local_session()
+        return oauth1_bundle(dotenv_config().oauth1_credentials())
     if operation == 'backend-read-oauth1':
         require(set(body) == {'client_id', 'owner'} and owner == LOCAL_OWNER and client == OAUTH1_NAMESPACE)
         local_session()
@@ -210,7 +227,7 @@ def main():
     os.umask(0o077)
     signal.signal(signal.SIGALRM, timed_out)
     parser = PrivateParser(description=__doc__)
-    parser.add_argument('operation', choices=['setup', 'setup-local', 'setup-oauth1', 'status-oauth1', 'status', 'backend-local-session', 'backend-read-oauth1', 'backend-read', 'backend-store-connection', 'backend-read-connection'])
+    parser.add_argument('operation', choices=['setup', 'setup-local', 'setup-oauth1', 'status-oauth1', 'status', 'backend-local-session', 'backend-read-oauth1-env', 'backend-read-oauth1', 'backend-read', 'backend-store-connection', 'backend-read-connection'])
     parser.add_argument('public_client_id', nargs='?')
     args = parser.parse_args()
     require((args.operation == 'setup-local') == (args.public_client_id is not None))
@@ -221,17 +238,14 @@ def main():
         raw = sys.stdin.buffer.read(7001)
         require(len(raw) <= 7000)
         body = json.loads(raw)
-        result = ipc(args.operation, Keyring(), body)
+        result = ipc(args.operation, None if args.operation in ('backend-local-session', 'backend-read-oauth1-env') else Keyring(), body)
     elif args.operation == 'setup-oauth1':
         require(all(os.isatty(fd) and os.fstat(fd).st_uid == os.getuid() for fd in [0, 1, 2]))
-        result = oauth1_enrollment(Keyring())
+        result = {'setup': 'edit_four_X_fields_in_private_dotenv', 'publishing_enabled': False, 'external_requests': 0}
     elif args.operation == 'status-oauth1':
         signal.alarm(5)
-        keyring = Keyring()
-        entries = keyring.items(OAUTH1_NAMESPACE, LOCAL_OWNER, 'oauth1')
-        result = {'keyring_available_unlocked': True, 'configured': len(entries) == 1,
-                  'auth_mode': 'oauth1', 'credential_values_read': 0, 'account_verification': 'not_checked_offline',
-                  'publishing_enabled': False, 'external_requests': 0}
+        config = dotenv_config()
+        result = config.oauth1_status(config.load(shell={}))
     elif args.operation == 'setup-local':
         require(all(os.isatty(fd) and os.fstat(fd).st_uid == os.getuid() for fd in [0, 1, 2]))
         identity(args.public_client_id, LOCAL_OWNER)
