@@ -7,6 +7,27 @@ use uuid::Uuid;
 
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Recovery can only reduce authority. It authenticates to the restricted,
+    // dedicated ledger and cannot load credentials, resume or send a request.
+    // This remains usable after an activation expires during a container crash.
+    if args.len() == 2 && args[0] == "recover-paused" {
+        let grant: Uuid = args[1].parse().map_err(|_| Error::Denied)?;
+        if grant.is_nil() {
+            return Err(Error::Denied);
+        }
+        let store = Store::connect_first_post_local(&database_url()?, false).await?;
+        store.verify_first_post_runtime_role().await?;
+        store.verify_autonomous_runtime_role().await?;
+        let owner = "6fd863e1-745d-4a06-b68e-eea69e854a69"
+            .parse()
+            .map_err(|_| Error::Denied)?;
+        let state = live_control(&store, owner, grant, "recover", None).await?;
+        if matches!(state["grant"]["state"].as_str(), Some("active" | "paused")) {
+            live_control(&store, owner, grant, "pause", None).await?;
+        }
+        println!("X grant paused and recovered; no credential access or dispatch");
+        return Ok(());
+    }
     if args.len() != 2
         || !matches!(
             args[0].as_str(),
