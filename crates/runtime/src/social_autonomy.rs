@@ -234,6 +234,24 @@ struct LiveGuard<'a> {
 }
 #[async_trait]
 impl MockDispatchGuard for LiveGuard<'_> {
+    async fn check_reserved(&self, hash: &str, account: &MockAccount) -> Result<()> {
+        let read = verify_live_grant(self.store, self.auth.owner(), self.grant, self.auth).await?;
+        if read["context"]["paused"] != false
+            || read["grant"]["state"] != "active"
+            || read["grant"]["account"]
+                != serde_json::to_value(account).map_err(|_| Error::Invalid)?
+            || !read["attempts"].as_array().is_some_and(|rows| {
+                rows.iter().any(|r| {
+                    r["id"] == self.attempt.to_string()
+                        && r["state"] == "reserved"
+                        && r["text_sha256"] == hash
+                })
+            })
+        {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    }
     async fn authorize_exact(&self, hash: &str, account: &MockAccount) -> Result<()> {
         verify_live_grant(self.store, self.auth.owner(), self.grant, self.auth).await?;
         let answer=self.store.autonomous_social_command_live(self.auth.owner(),"guard",json!({
