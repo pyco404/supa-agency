@@ -16,11 +16,11 @@ OWNER = '6fd863e1-745d-4a06-b68e-eea69e854a69'
 FLAG = '--authorize-one-connection-and-one-budgeted-identity-read'
 
 
-def terminal(args):
+def terminal(args, confirmation=b'CONNECT @supa_agency ONCE\n'):
     master, slave = pty.openpty()
     def no_core(): resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     child = subprocess.Popen([str(BINARY), *args], stdin=slave, stdout=slave, stderr=slave,
-        cwd=ROOT, env={'PATH': '/usr/bin', 'LANG': 'C.UTF-8'}, preexec_fn=no_core)
+        cwd=ROOT, env={'PATH': '/usr/bin', 'LANG': 'C.UTF-8', 'DBUS_SESSION_BUS_ADDRESS':'unix:path=/tmp/supa-nonexistent-test-bus'}, preexec_fn=no_core)
     os.close(slave)
     output, confirmed = bytearray(), False
     deadline = time.monotonic() + 10
@@ -32,8 +32,8 @@ def terminal(args):
                 except OSError: break
                 if not chunk: break
                 output.extend(chunk)
-                if b'Type CONNECT' in output and not confirmed:
-                    os.write(master, b'CONNECT @supa_agency ONCE\n')
+                if (b'Type CONNECT' in output or b'Type VERIFY' in output) and not confirmed:
+                    os.write(master, confirmation)
                     confirmed = True
             if child.poll() is not None and not ready: break
         code = child.wait(timeout=1)
@@ -52,22 +52,38 @@ class CliGate(unittest.TestCase):
         self.assertFalse(confirmed)
         self.assertNotIn(b'https://x.com/', output)
 
-    def test_terminal_confirmation_cannot_authorize_another_identity(self):
+    def test_identity_and_certificate_arguments_are_not_accepted_by_new_connector(self):
         code, output, confirmed = terminal(['connect', str(uuid.uuid4()), 'fixture_client', str(uuid.uuid4()), FLAG])
         self.assertNotEqual(code, 0)
-        self.assertTrue(confirmed)
+        self.assertFalse(confirmed)
         self.assertNotIn(b'Open this URL', output)
-        self.assertIn(b'STOPPED', output)
 
-    @unittest.skipIf(Path('/usr/local/libexec/supa-x-owner-authorize').exists(),
-                     'never exercise an installed real administrator authority from a synthetic test')
-    def test_correct_owner_without_installed_authority_fails_before_consent(self):
-        code, output, confirmed = terminal(['connect', OWNER, 'fixture_client', str(uuid.uuid4()), FLAG])
+    def test_unavailable_local_keyring_denies_before_any_consent_or_secret_read(self):
+        code, output, confirmed = terminal(['connect-local','fixture_client',FLAG])
         self.assertNotEqual(code, 0)
         self.assertTrue(confirmed)
         self.assertNotIn(b'Open this URL', output)
         self.assertNotIn(b'https://x.com/', output)
-        self.assertIn(b'STOPPED', output)
+
+    def test_cancelled_confirmation_never_starts_consent(self):
+        code, output, confirmed = terminal(['connect-local','fixture_client',FLAG],b'CANCEL\n')
+        self.assertNotEqual(code, 0)
+        self.assertTrue(confirmed)
+        self.assertNotIn(b'Open this URL', output)
+
+    def test_oauth1_verification_needs_explicit_budget_flag_and_confirmation(self):
+        code,output,confirmed=terminal(['verify-oauth1'])
+        self.assertNotEqual(code,0)
+        self.assertFalse(confirmed)
+        code,output,confirmed=terminal(['verify-oauth1','--authorize-one-budgeted-identity-read'],b'CANCEL\n')
+        self.assertNotEqual(code,0)
+        self.assertTrue(confirmed)
+        self.assertNotIn(b'account_id',output)
+
+    def test_oauth1_setup_has_no_noninteractive_secret_input_fallback(self):
+        result=subprocess.run([str(BINARY),'setup-oauth1'],input=b'fixture-secret-not-for-store',capture_output=True,timeout=3)
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotIn(b'fixture-secret-not-for-store',result.stdout+result.stderr)
 
 
 if __name__ == '__main__': unittest.main()
