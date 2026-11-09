@@ -2,12 +2,14 @@
 """Disposable TLS OAuth server: fixed synthetic fixtures; never contacts X."""
 import base64
 import http.server
+import hashlib
+import hmac
 import json
 import ssl
 import sys
 import time
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote, quote
 
 mode, certificate, key, stats = sys.argv[1:]
 count = 0
@@ -51,9 +53,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif mode == 'slow':
                 time.sleep(6)
         elif self.command == 'GET' and self.path == '/2/users/me':
-            assert self.headers['Authorization'] == 'Bearer fixture-access-token-only'
-            result = {'data': {'id': '123', 'username': 'other' if mode in ['account', 'posting_account'] else 'supa_agency'}}
-            if mode == 'partial':
+            if mode.startswith('oauth1_'):
+                auth = self.headers['Authorization']
+                assert auth.startswith('OAuth ')
+                fields = dict((unquote(k), unquote(v.strip('"'))) for k,v in (p.split('=',1) for p in auth[6:].split(', ')))
+                signature = fields.pop('oauth_signature')
+                assert fields['oauth_consumer_key'] == 'fixture-consumer-key'
+                assert fields['oauth_token'] == 'fixture-access-token'
+                assert fields['oauth_signature_method'] == 'HMAC-SHA1' and fields['oauth_version'] == '1.0'
+                encode = lambda value: quote(value, safe='~-._')
+                normalized = '&'.join(encode(k)+'='+encode(v) for k,v in sorted(fields.items()))
+                endpoint = 'https://127.0.0.1:'+str(self.server.server_port)+'/2/users/me'
+                base = 'GET&'+encode(endpoint)+'&'+encode(normalized)
+                expected = base64.b64encode(hmac.new(b'fixture-consumer-secret&fixture-access-secret', base.encode(), hashlib.sha1).digest()).decode()
+                assert hmac.compare_digest(signature, expected)
+                assert self.command == 'GET'
+                status = {'oauth1_expired':401, 'oauth1_rate':429, 'oauth1_credits':402, 'oauth1_redirect':302}.get(mode,200)
+                if mode == 'oauth1_redirect': headers['Location'] = 'https://example.invalid/never-follow'
+            else:
+                assert self.headers['Authorization'] == 'Bearer fixture-access-token-only'
+            result = {'data': {'id': '0' if mode == 'oauth1_bad_id' else '123', 'username': 'other' if mode in ['account', 'posting_account', 'oauth1_account'] else 'supa_agency'}}
+            if mode in ['partial', 'oauth1_partial']:
                 result['errors'] = [{'message': 'synthetic partial error'}]
         elif self.command == 'POST' and self.path == '/2/tweets' and mode.startswith('posting_'):
             assert self.headers['Authorization'] == 'Bearer fixture-access-token-only'
