@@ -207,15 +207,18 @@ def command(values, component, shell=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['validate', 'run', 'x-setup', 'x-connect', 'x-oauth1-setup', 'x-oauth1-status', 'x-oauth1-verify'])
+    parser.add_argument('action', choices=['validate', 'run', 'x-setup', 'x-connect', 'x-oauth1-setup', 'x-oauth1-status', 'x-oauth1-verify', 'x-first-post-prepare', 'x-first-post'])
     parser.add_argument('component', nargs='?', choices=['all', 'api', 'web', 'preview', 'x', 'x-oauth1', 'mint'], default='all')
+    parser.add_argument('--authorization-id')
+    parser.add_argument('--expires-at', type=int)
     args = parser.parse_args()
+    require(args.action == 'x-first-post' or (args.authorization_id is None and args.expires_at is None), 'first_post_options_only')
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     values = load()
     if args.action in ('x-setup', 'x-connect'):
         require(args.component in ('all', 'x'), 'select_x_only_component')
         args.component = 'x'
-    if args.action.startswith('x-oauth1-'):
+    if args.action.startswith(('x-oauth1-', 'x-first-post')):
         require(args.component in ('all', 'x-oauth1'), 'select_x_oauth1_only_component')
         args.component = 'x-oauth1'
     if args.action in ('x-oauth1-status', 'x-oauth1-setup'):
@@ -236,6 +239,22 @@ def main():
         print(json.dumps({'valid': True, 'component': args.component, 'secrets_displayed': False,
                           'external_requests': 0, 'keyring_reads': 0}))
         return 0
+    if args.action.startswith('x-first-post'):
+        binary = ROOT / 'target/work-review-validation/debug/supa-x-first-post'
+        require(binary.is_file() and not binary.is_symlink(), 'build_first_post_command_first')
+        env = {k:v for k,v in os.environ.items() if k in BASE}
+        if args.action == 'x-first-post-prepare':
+            argv = [str(binary), 'prepare']
+        else:
+            require(all(os.isatty(fd) for fd in [0,1,2]), 'private_owner_terminal_required')
+            require(args.authorization_id is not None and args.expires_at is not None, 'exact_authorization_id_and_expiry_required')
+            try: require(str(uuid.UUID(args.authorization_id)) == args.authorization_id and uuid.UUID(args.authorization_id).int != 0, 'invalid_authorization_id')
+            except ValueError: raise Invalid('invalid_authorization_id')
+            require(loopback_url(values.get('DATABASE_URL',''), ['postgresql'], True), 'local_first_post_database_required')
+            env['DATABASE_URL'] = values['DATABASE_URL']
+            argv = [str(binary), 'post', args.authorization_id, str(args.expires_at), '--authorize-one-get-and-one-post-budget-025']
+        os.chdir(ROOT)
+        os.execve(binary, argv, env)
     if args.action.startswith('x-oauth1-'):
         if args.action != 'x-oauth1-status':
             require(all(os.isatty(fd) for fd in [0, 1, 2]), 'private_owner_terminal_required')
