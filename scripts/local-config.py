@@ -140,7 +140,7 @@ def validate(values, component='all'):
         check(bool(re.fullmatch(r'[A-Za-z0-9_-]{1,200}', values.get('SUPA_X_CLIENT_ID', ''))), 'SUPA_X_CLIENT_ID')
         try:
             owner = values.get('SUPA_X_OWNER_ID', '')
-            check(str(uuid.UUID(owner)) == owner and uuid.UUID(owner).int != 0, 'SUPA_X_OWNER_ID')
+            check(not owner or str(uuid.UUID(owner)) == owner and uuid.UUID(owner).int != 0, 'SUPA_X_OWNER_ID')
         except ValueError:
             check(False, 'SUPA_X_OWNER_ID')
     return errors
@@ -187,11 +187,17 @@ def command(values, component, shell=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['validate', 'run'])
-    parser.add_argument('component', nargs='?', choices=['all', 'api', 'web', 'preview', 'x', 'mint'], default='all')
+    parser.add_argument('action', choices=['validate', 'run', 'x-setup', 'x-connect', 'x-oauth1-setup', 'x-oauth1-status', 'x-oauth1-verify'])
+    parser.add_argument('component', nargs='?', choices=['all', 'api', 'web', 'preview', 'x', 'x-oauth1', 'mint'], default='all')
     args = parser.parse_args()
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     values = load()
+    if args.action in ('x-setup', 'x-connect'):
+        require(args.component in ('all', 'x'), 'select_x_only_component')
+        args.component = 'x'
+    if args.action.startswith('x-oauth1-'):
+        require(args.component in ('all', 'x-oauth1'), 'select_x_oauth1_only_component')
+        args.component = 'x-oauth1'
     errors = validate(values, args.component)
     if errors:
         print(json.dumps({'valid': False, 'missing_or_invalid': errors}))
@@ -202,6 +208,29 @@ def main():
         print(json.dumps({'valid': True, 'component': args.component, 'secrets_displayed': False,
                           'external_requests': 0, 'keyring_reads': 0}))
         return 0
+    if args.action.startswith('x-oauth1-'):
+        if args.action != 'x-oauth1-status':
+            require(all(os.isatty(fd) for fd in [0, 1, 2]), 'private_owner_terminal_required')
+        binary = ROOT / 'target/work-review-validation/debug/supa-x-oauth-local'
+        require(binary.is_file() and not binary.is_symlink(), 'build_local_x_cli_first')
+        operation = {'x-oauth1-setup':'setup-oauth1', 'x-oauth1-status':'status-oauth1',
+                     'x-oauth1-verify':'verify-oauth1'}[args.action]
+        argv = [str(binary), operation]
+        if operation == 'verify-oauth1': argv.append('--authorize-one-budgeted-identity-read')
+        env = {k: v for k, v in os.environ.items() if k in BASE}
+        os.chdir(ROOT)
+        os.execve(binary, argv, env)
+    if args.action in ('x-setup', 'x-connect'):
+        require(all(os.isatty(fd) for fd in [0, 1, 2]), 'private_owner_terminal_required')
+        binary = ROOT / 'target/work-review-validation/debug/supa-x-oauth-local'
+        require(binary.is_file() and not binary.is_symlink(), 'build_local_x_cli_first')
+        env = {k: v for k, v in os.environ.items() if k in BASE}
+        operation = 'setup-local' if args.action == 'x-setup' else 'connect-local'
+        argv = [str(binary), operation, values['SUPA_X_CLIENT_ID']]
+        if args.action == 'x-connect':
+            argv.append('--authorize-one-connection-and-one-budgeted-identity-read')
+        os.chdir(ROOT)
+        os.execve(binary, argv, env)
     require(args.component in ('api', 'web', 'preview', 'x'), 'select_explicit_run_component')
     argv, cwd, env = command(values, args.component)
     os.chdir(cwd)
