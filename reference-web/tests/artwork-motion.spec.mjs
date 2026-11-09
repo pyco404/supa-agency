@@ -55,7 +55,8 @@ test('offscreen, hidden, reduced-motion and navigation release page playback',as
  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});await expect(movie(page)).toHaveCount(0);
  await page.evaluate(()=>{delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));});await expect(movie(page)).toHaveCount(1);
  const geometry=await artwork(page).locator('picture').boundingBox();
- await page.emulateMedia({reducedMotion:'reduce'});await expect(movie(page)).toHaveCount(0);
+ await page.emulateMedia({reducedMotion:'reduce'});
+ await expect.poll(()=>page.evaluate(()=>({motion:document.documentElement.dataset.motion,matches:matchMedia('(prefers-reduced-motion: reduce)').matches,videos:document.querySelectorAll('.section-motion-media video').length}))).toEqual({motion:'still',matches:true,videos:0});
  const poster=artwork(page).locator('picture > img');await expect(poster).toBeVisible();expect(await poster.evaluate(v=>v.complete&&v.naturalWidth>0)).toBe(true);
  expect(await artwork(page).locator('picture').boundingBox()).toEqual(geometry);
  await page.emulateMedia({reducedMotion:'no-preference'});await expect(movie(page)).toHaveCount(1);
@@ -78,4 +79,14 @@ test('MP4 fallback decodes when WebM is unavailable',async({page})=>{
  await expect.poll(()=>movie(page).evaluate(v=>v.currentSrc)).toMatch(/\.mp4$/);
  await expect.poll(()=>movie(page).evaluate(v=>v.currentTime)).toBeGreaterThan(.2);
  expect(observed.private).toEqual([]);expect(observed.errors).toEqual([]);
+});
+
+test('preference-change payload immediately releases the decoder before a fresh media query',async({page})=>{
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ await page.addInitScript(()=>{const native=window.matchMedia.bind(window);window.artworkQueries=[];window.matchMedia=query=>{const result=native(query);if(query==='(prefers-reduced-motion: reduce)')window.artworkQueries.push(result);return result;};});
+ await open(page);await expect(movie(page)).toHaveCount(1);
+ await page.evaluate(()=>{for(const query of window.artworkQueries)query.dispatchEvent(new MediaQueryListEvent('change',{matches:true,media:query.media}));});
+ await expect(movie(page)).toHaveCount(0);
+ await page.evaluate(()=>{for(const query of window.artworkQueries)query.dispatchEvent(new MediaQueryListEvent('change',{matches:false,media:query.media}));});
+ await expect(movie(page)).toHaveCount(1);
 });
