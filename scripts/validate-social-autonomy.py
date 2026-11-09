@@ -42,6 +42,8 @@ def main():
         assert 'PostgreSQL) 18.' in version
         cargo=['cargo','test','--locked','--offline','-p','supa-runtime','--test','social_autonomy']
         run(cargo+['--no-run'],'build',300)
+        first=['cargo','test','--locked','--offline','-p','supa-runtime','--test','x_first_post']
+        run(first+['--no-run'],'first-post-build',300)
         pg('initdb','-D',data,'-U','supa_autonomy_test','--auth-local=trust','--auth-host=reject','--wal-segsize=1','--encoding=UTF8','--locale=C.UTF-8','--no-instructions')
         with (data/'postgresql.conf').open('a') as f:
             f.write(f"\nlisten_addresses=''\nunix_socket_directories='{socket}'\nport=55483\nmax_wal_size='32MB'\nmin_wal_size='2MB'\n")
@@ -51,11 +53,13 @@ def main():
         run(cargo+['--','--exact','journey','--ignored','--nocapture'],'journey')
         run(cargo+['--','--exact','boundaries','--ignored','--nocapture'],'boundaries')
         run(cargo+['--','--exact','live_boundaries','--ignored','--nocapture'],'live-boundaries')
+        run(first+['--','--exact','journey','--ignored','--nocapture'],'first-post-journey')
         pg('pg_ctl','-D',data,'-m','fast','-w','stop');started=False
         pg('pg_ctl','-D',data,'-l',reports/'postgres.log','-w','start');started=True
         run(cargo+['--','--exact','restart','--ignored','--nocapture'],'restart')
+        run(first+['--','--exact','restart','--ignored','--nocapture'],'first-post-restart')
         assert before=={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (ROOT/'migrations').glob('*.sql')}
-        print(json.dumps({'passed':True,'postgres':version,'mock_only':True,'live_policy_tested':True,'restart_recovery':True,'real_X_requests':0}))
+        print(json.dumps({'passed':True,'postgres':version,'mock_only':True,'live_policy_tested':True,'restart_recovery':True,'real_X_requests':0,'first_post_command_and_restart':True}))
     finally:
         if started or (data/'postmaster.pid').exists():pg('pg_ctl','-D',data,'-m','fast','-w','stop')
         unchanged = registered==json.loads(subprocess.check_output(['pg_lsclusters','--json']))
