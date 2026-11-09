@@ -76,7 +76,7 @@ export async function GET(request: Request, context: { params: Promise<{ path?: 
   const file = [...sections, "/site", "/site/"].includes(path) ? "index.html" : parts.join("/");
   const asset = /^public\/(assets\/[a-z0-9-]+\.svg|fonts\/[a-zA-Z0-9._-]+\.(woff2|ttf|txt))$/.test(file)
     || /^public\/assets\/supa-(home|agents|intelligence|memory|economy|social|trading|factory|about)-(?:(thumb|480|960)\.webp|960\.avif)$/.test(file)
-    || /^public\/assets\/supa-(economy|social|trading|factory)-loop\.(webm|mp4)$/.test(file);
+    || /^public\/assets\/supa-((economy|social|trading|factory)-loop|factory-artwork-loop)\.(webm|mp4)$/.test(file);
   if (!files.has(file) && !asset) return new Response(await readFile(resolve(process.cwd(),"../reference-web/not-found.html")), {status:404, headers:{...headers,"Content-Type":"text/html; charset=utf-8"}});
   try {
     const root = await realpath(resolve(process.cwd(), "../reference-web"));
