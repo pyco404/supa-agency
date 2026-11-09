@@ -134,6 +134,12 @@ impl PrivateKeyring {
         connection.validate(auth)?;
         Ok(connection)
     }
+    pub(crate) fn read_oauth1(&self) -> Result<Zeroizing<Vec<u8>>> {
+        self.call(
+            "backend-read-oauth1",
+            &serde_json::json!({"owner":self.owner,"client_id":crate::x_review::oauth1::NAMESPACE}),
+        )
+    }
     fn retain(
         &self,
         client_id: &str,
