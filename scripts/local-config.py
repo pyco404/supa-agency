@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MINT = 'SUPAojJGEuTrdknFuad7TSujxgU1x2Bz2ch2bZqFfqF'
 CALLBACK = 'http://127.0.0.1:37641/oauth/x/callback'
 CUSTODY = 'supa-agency/x/supa_agency'
+OAUTH1_FIELDS = ('X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', 'X_ACCESS_SECRET')
 KEY = re.compile(r'[A-Z][A-Z0-9_]*')
 DISABLED = '''SUPA_ALLOW_OPENAI SUPA_ALLOW_ANTHROPIC SUPA_CONTROLLED_INFERENCE
 SUPA_CONTROLLED_WORK SUPA_SUPERVISED_REAL_MODEL SUPA_WORKER_ENABLED
@@ -76,6 +77,22 @@ def load(root=ROOT, shell=None):
     require(reserved <= allowed, 'unsupported_exported_variable')
     values.update({k: shell[k] for k in allowed if k in shell})
     return values
+
+
+def oauth1_status(values):
+    present = {key: bool(values.get(key)) for key in OAUTH1_FIELDS}
+    invalid = [key for key in OAUTH1_FIELDS if values.get(key) and
+               not (len(values[key]) <= 1024 and all(33 <= ord(c) <= 126 for c in values[key]))]
+    return {'configured': all(present.values()) and not invalid, 'present': present,
+            'invalid_fields': invalid, 'source': '.env', 'publishing_enabled': False,
+            'external_requests': 0, 'keyring_reads': 0, 'secrets_displayed': False}
+
+
+def oauth1_credentials(root=ROOT):
+    # Deliberately ignore exported credentials: this path uses the private .env only.
+    values = load(root, shell={})
+    require(oauth1_status(values)['configured'], 'oauth1_credentials_missing_or_invalid')
+    return {key: values[key] for key in OAUTH1_FIELDS}
 
 
 def loopback_url(value, scheme, database=False):
@@ -143,6 +160,9 @@ def validate(values, component='all'):
             check(not owner or str(uuid.UUID(owner)) == owner and uuid.UUID(owner).int != 0, 'SUPA_X_OWNER_ID')
         except ValueError:
             check(False, 'SUPA_X_OWNER_ID')
+    if component == 'x-oauth1':
+        status = oauth1_status(values)
+        errors.extend(key for key in OAUTH1_FIELDS if not status['present'][key] or key in status['invalid_fields'])
     return errors
 
 
@@ -172,7 +192,7 @@ def command(values, component, shell=None):
     shell = os.environ if shell is None else shell
     env = {k: v for k, v in shell.items() if k in BASE}
     env.update({k: v for k, v in values.items() if component != 'x' and v and (k in WEB if component != 'api' else
-                    not k.startswith(('SUPA_X_', 'SUPA_PLATFORM_', 'OPENAI_')) and k != 'PORT')})
+                    not k.startswith(('SUPA_X_', 'SUPA_PLATFORM_', 'OPENAI_')) and k not in OAUTH1_FIELDS and k != 'PORT')})
     # Preview uses explicitly exported root settings and must not load legacy web credentials.
     if component == 'preview':
         env['SUPA_SITE_ENV_FILE'] = ''
@@ -198,6 +218,14 @@ def main():
     if args.action.startswith('x-oauth1-'):
         require(args.component in ('all', 'x-oauth1'), 'select_x_oauth1_only_component')
         args.component = 'x-oauth1'
+    if args.action in ('x-oauth1-status', 'x-oauth1-setup'):
+        print(json.dumps(oauth1_status(load(shell={}))))
+        if args.action == 'x-oauth1-setup':
+            print('Edit the four X_* fields in .env; no enrollment is required.')
+        return 0
+    if args.component == 'x-oauth1':
+        private_values = load(shell={})
+        values.update({key: private_values.get(key, '') for key in OAUTH1_FIELDS})
     errors = validate(values, args.component)
     if errors:
         print(json.dumps({'valid': False, 'missing_or_invalid': errors}))
