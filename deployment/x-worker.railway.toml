@@ -1,0 +1,15 @@
+# Preparation only: no Railway service has been created or modified.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "deployment/x-worker.Dockerfile"
+
+[deploy]
+requiredMountPath = "/etc/supa-agent"
+numReplicas = 1
+healthcheckPath = "/healthz"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+sleepApplication = false
+drainingSeconds = 60
+overlapSeconds = 0
