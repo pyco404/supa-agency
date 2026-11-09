@@ -385,6 +385,16 @@ fn private_keyring_bridge_reads_and_retains_only_in_disposable_session() {
             .client_secret(CREDENTIAL_CUSTODY, "synthetic_confidential_client")
             .is_err()
     );
+    if std::env::var("SUPA_X_KEYRING_LOCAL_SESSION_TEST").as_deref() == Ok("1") {
+        let raw = PrivateKeyring::new("6fd863e1-745d-4a06-b68e-eea69e854a69".parse().unwrap())
+            .unwrap()
+            .read_oauth1()
+            .unwrap();
+        let bundle: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(bundle.as_object().unwrap().len(), 4);
+        assert_eq!(bundle["X_API_SECRET"], "fixture-x_api_secret");
+        assert_eq!(bundle["X_ACCESS_SECRET"], "fixture-x_access_secret");
+    }
     let token = TokenBody {
         access_token: Zeroizing::new("fixture-access-token-only".into()),
         token_type: "bearer".into(),
@@ -461,4 +471,35 @@ async fn prepared_posting_uses_real_https_wire_only_against_disposable_fixture()
     .await;
     assert_eq!(result.state, "failed");
     assert_eq!(fixture.calls(), 0);
+}
+
+#[tokio::test]
+async fn oauth1_identity_signatures_and_account_checks_use_only_mock_https_gets() {
+    for mode in [
+        "oauth1_ok",
+        "oauth1_account",
+        "oauth1_expired",
+        "oauth1_rate",
+        "oauth1_credits",
+        "oauth1_redirect",
+        "oauth1_partial",
+        "oauth1_bad_id",
+    ] {
+        let fixture = TlsFixture::new(mode);
+        let transport = fixture.transport(true);
+        let result = crate::x_review::oauth1::test_identity(
+            transport.client,
+            &format!("https://127.0.0.1:{}", fixture.port),
+        )
+        .await;
+        if mode == "oauth1_ok" {
+            let receipt = result.unwrap();
+            assert_eq!(receipt.account_id, "123");
+            assert_eq!(receipt.username, "supa_agency");
+            assert!(!receipt.publishing_enabled);
+        } else {
+            assert!(result.is_err(), "{mode}");
+        }
+        assert_eq!(fixture.calls(), 1, "one GET, zero posts or retries: {mode}");
+    }
 }
