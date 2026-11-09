@@ -154,3 +154,92 @@ impl Store {
         Ok(result)
     }
 }
+
+impl Store {
+    /// Local trusted backend only. No HTTP actor or automatic schema/policy installation.
+    pub async fn first_post_command(&self, actor: Uuid, op: &str, body: Value) -> Result<Value> {
+        if self.operational_context().is_some() || actor.is_nil() {
+            return Err(Error::Denied);
+        }
+        sqlx::query_scalar("SELECT social_review.first_post($1,$2,$3)")
+            .bind(actor)
+            .bind(op)
+            .bind(body)
+            .fetch_one(self.pool())
+            .await
+            .map_err(|_| Error::Denied)
+    }
+    pub async fn connect_first_post_local(url: &str, testing: bool) -> Result<Self> {
+        use sqlx::ConnectOptions;
+        let options: sqlx::postgres::PgConnectOptions = url.parse().map_err(|_| Error::Denied)?;
+        if options.get_database()
+            != Some(if testing {
+                "supa_autonomy_test"
+            } else {
+                "supa_x_first_post"
+            })
+            || !matches!(options.get_host(), "127.0.0.1" | "localhost" | "::1")
+        {
+            return Err(Error::Denied);
+        }
+        if let Some(socket) = options.get_socket() {
+            let parent = socket.parent().ok_or(Error::Denied)?;
+            if !testing
+                || parent.parent() != Some(std::path::Path::new("/tmp"))
+                || socket.file_name().and_then(|s| s.to_str()) != Some("socket")
+                || !parent
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| {
+                        s.strip_prefix("supa-autonomy-test-").is_some_and(|v| {
+                            v.len() == 32 && v.bytes().all(|c| c.is_ascii_hexdigit())
+                        })
+                    })
+            {
+                return Err(Error::Denied);
+            }
+        }
+        let store = Self {
+            operational: None,
+            status_pool: None,
+            pool: PgPoolOptions::new()
+                .max_connections(2)
+                .acquire_timeout(std::time::Duration::from_secs(5))
+                .connect_with(options.disable_statement_logging())
+                .await
+                .map_err(|_| Error::Denied)?,
+        };
+        store.verify_first_post_local_database(testing).await?;
+        Ok(store)
+    }
+    pub async fn verify_first_post_runtime_role(&self) -> Result<()> {
+        let restricted:bool=sqlx::query_scalar("SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls) AND NOT has_table_privilege(current_user,'public.agents','INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_table_privilege(current_user,'social_review.drafts','INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_table_privilege(current_user,'public.agent_access','INSERT,UPDATE,DELETE,TRUNCATE') AND has_function_privilege(current_user,'social_review.first_post(uuid,text,jsonb)','EXECUTE') FROM pg_roles WHERE rolname=current_user").fetch_one(self.pool()).await.map_err(|_|Error::Denied)?;
+        if !restricted {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    }
+    /// Fail closed outside a dedicated local ledger or the existing disposable test fixture.
+    pub async fn verify_first_post_local_database(&self, testing: bool) -> Result<()> {
+        let (name, version, addr): (String, String, Option<String>) = sqlx::query_as(
+            "SELECT current_database(),current_setting('server_version'),inet_server_addr()::text",
+        )
+        .fetch_one(self.pool())
+        .await
+        .map_err(|_| Error::Denied)?;
+        let expected = if testing {
+            "supa_autonomy_test"
+        } else {
+            "supa_x_first_post"
+        };
+        if name != expected
+            || !version.starts_with("18.")
+            || addr
+                .as_deref()
+                .is_some_and(|v| v != "127.0.0.1" && v != "::1")
+        {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    }
+}
