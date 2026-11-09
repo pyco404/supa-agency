@@ -67,7 +67,8 @@ async fn restricted(s: &Store) -> Store {
             .await
             .is_err()
     );
-    let _ = s;
+    rt.verify_autonomous_runtime_role().await.unwrap();
+    assert!(s.verify_autonomous_runtime_role().await.is_err());
     rt
 }
 async fn command(s: &Store, op: &str, grant: Uuid) -> Value {
