@@ -195,7 +195,7 @@ async fn journey() {
     agent.id = id(10);
     a.create_owned(&agent, id(1)).await.unwrap();
     sqlx::query("INSERT INTO social_review.policies(agent_id,owner_id,account,enabled) VALUES($1,$2,'{\"id\":\"1\",\"username\":\"supa_agency\",\"mode\":\"mock\"}',true)").bind(id(10)).bind(id(1)).execute(a.pool()).await.unwrap();
-    sqlx::raw_sql("CREATE ROLE supa_autonomy_runtime LOGIN; GRANT USAGE ON SCHEMA social_autonomy TO supa_autonomy_runtime; GRANT EXECUTE ON FUNCTION social_autonomy.command(uuid,text,jsonb) TO supa_autonomy_runtime;").execute(a.pool()).await.unwrap();
+    sqlx::raw_sql("CREATE ROLE supa_autonomy_runtime LOGIN; GRANT USAGE ON SCHEMA social_autonomy TO supa_autonomy_runtime; GRANT EXECUTE ON FUNCTION social_autonomy.command(uuid,text,jsonb), social_autonomy.policy_mode(uuid) TO supa_autonomy_runtime;").execute(a.pool()).await.unwrap();
     let s = restricted(&a).await;
     let g = grant(&s, 100, 250000).await;
     let wire = Wire::new("ok");
@@ -359,6 +359,19 @@ async fn restart() {
         "not_due"
     );
     assert!(wire.calls.lock().unwrap().is_empty());
+    let live = s
+        .autonomous_social_command_live(id(3), "read", json!({"grant_id":id(30000)}))
+        .await
+        .unwrap();
+    assert_eq!(live["grant"]["state"], "revoked");
+    assert_eq!(live["attempts"][0]["state"], "uncertain");
+    assert_eq!(live["attempts"][0]["receipt"]["mode"], "live");
+    assert_eq!(live["grant"]["reserved"], 25000);
+    assert!(
+        s.autonomous_social_command_live(id(3), "resume", json!({"grant_id":id(30000)}))
+            .await
+            .is_err()
+    );
 }
 
 async fn release_for(a: &Store, agent: Uuid, owner: Uuid, event: Uuid, kind: &str, code: &str) {
@@ -628,4 +641,174 @@ async fn boundaries() {
         "not_due"
     );
     assert_eq!(wire.calls.lock().unwrap().len(), before);
+}
+
+#[tokio::test]
+#[ignore = "explicit new disposable PG18 fixture only; fake receipts, zero X calls"]
+async fn live_boundaries() {
+    let a = admin().await;
+    let mut agent = Agent::new(
+        "private-live-fixture".into(),
+        Personality::default(),
+        CycleConfig::default(),
+        BTreeSet::new(),
+    )
+    .unwrap();
+    agent.id = id(30);
+    a.create_owned(&agent, id(3)).await.unwrap();
+    let account = json!({"id":"123","username":"supa_agency","mode":"live"});
+    sqlx::query("INSERT INTO social_review.policies(agent_id,owner_id,account,enabled) VALUES($1,$2,$3,true)")
+        .bind(agent.id).bind(id(3)).bind(&account).execute(a.pool()).await.unwrap();
+    let s = restricted(&a).await;
+    let body = json!({"grant_id":id(30000),"account":account,"confirmed":true,"scope":"original_text_released_metadata_only",
+        "expires_at":(Utc::now()+Duration::hours(1)).to_rfc3339(),"max_posts":6,"interval_seconds":14400,"budget_microusd":150000,"activation_receipt_id":id(30003),"owner_proof_sha256":"a".repeat(64)});
+    assert!(
+        s.autonomous_social_command_mock(id(3), "authorize", body.clone())
+            .await
+            .is_err()
+    );
+    assert!(
+        s.autonomous_social_command_live(id(2), "authorize", body.clone())
+            .await
+            .is_err()
+    );
+    let grant = s
+        .autonomous_social_command_live(id(3), "authorize", body)
+        .await
+        .unwrap();
+    assert_eq!(grant["state"], "paused");
+    let gid = id(30000);
+    let grant_body = json!({"grant_id":gid});
+    assert!(
+        supa_runtime::social_autonomy::live_control(&s, id(3), gid, "resume", None)
+            .await
+            .is_err()
+    );
+    // Simulate only the privileged setup's checked activation boundary. This
+    // disposable SQL test never constructs a live token or root activation receipt.
+    s.autonomous_social_command_live(id(3), "resume", grant_body.clone())
+        .await
+        .unwrap();
+    let read = s
+        .autonomous_social_command_live(id(3), "read", grant_body.clone())
+        .await
+        .unwrap();
+    assert_eq!(read["due"], false); // independent private Social emergency pause
+    sqlx::query("INSERT INTO social_review.pauses(agent_id,paused) VALUES($1,false)")
+        .bind(agent.id)
+        .execute(a.pool())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO activity(id,agent_id,kind,code,simulated) VALUES($1,$2,'cycle','completed',true)")
+        .bind(id(30001)).bind(agent.id).execute(a.pool()).await.unwrap();
+    let context: Value = sqlx::query_scalar("SELECT social_review.context($1)")
+        .bind(agent.id)
+        .fetch_one(a.pool())
+        .await
+        .unwrap();
+    let src = &context["sources"][0];
+    sqlx::query("INSERT INTO social_review.releases(agent_id,event_id,actor,snapshot_sha256,released) VALUES($1,$2,$3,$4,true)")
+        .bind(agent.id).bind(id(30001)).bind(id(3)).bind(src["snapshot_sha256"].as_str().unwrap()).execute(a.pool()).await.unwrap();
+    let read = s
+        .autonomous_social_command_live(id(3), "read", grant_body.clone())
+        .await
+        .unwrap();
+    assert_eq!(read["mode"], "live");
+    assert_eq!(read["due"], true);
+    let proposal = draft_released(&read["context"]).unwrap();
+    let attempt = id(30002);
+    let reserve = json!({"grant_id":gid,"attempt_id":attempt,"context_sha256":read["context_sha256"],"proposal":proposal});
+    let first = s
+        .autonomous_social_command_live(id(3), "reserve", reserve.clone())
+        .await
+        .unwrap();
+    assert_eq!(first["fresh"], true);
+    // A repeated proposal is now in history and fails revalidation; no second
+    // reservation or dispatch is admitted.
+    assert!(
+        s.autonomous_social_command_live(id(3), "reserve", reserve)
+            .await
+            .is_err()
+    );
+    let guard = json!({"grant_id":gid,"attempt_id":attempt,"account":account,"text_sha256":proposal["text_sha256"]});
+    assert!(
+        s.autonomous_social_command_live(id(2), "guard", guard.clone())
+            .await
+            .is_err()
+    );
+    sqlx::query("INSERT INTO social_review.pauses(agent_id,paused) VALUES($1,true)")
+        .bind(agent.id)
+        .execute(a.pool())
+        .await
+        .unwrap();
+    assert!(
+        s.autonomous_social_command_live(id(3), "guard", guard.clone())
+            .await
+            .is_err()
+    );
+    sqlx::query("INSERT INTO social_review.pauses(agent_id,paused) VALUES($1,false)")
+        .bind(agent.id)
+        .execute(a.pool())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM agent_access WHERE agent_id=$1 AND principal_id=$2")
+        .bind(agent.id)
+        .bind(id(3))
+        .execute(a.pool())
+        .await
+        .unwrap();
+    assert!(
+        s.autonomous_social_command_live(id(3), "guard", guard.clone())
+            .await
+            .is_err()
+    );
+    sqlx::query(
+        "INSERT INTO agent_access(agent_id,principal_id,role,granted_by) VALUES($1,$2,'owner',$2)",
+    )
+    .bind(agent.id)
+    .bind(id(3))
+    .execute(a.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        s.autonomous_social_command_live(id(3), "guard", guard)
+            .await
+            .unwrap(),
+        true
+    );
+    // Restart recovery burns the intent and quarantines the numeric account.
+    let recovered = s
+        .autonomous_social_command_live(id(3), "recover", grant_body.clone())
+        .await
+        .unwrap();
+    assert_eq!(recovered["grant"]["state"], "paused");
+    assert_eq!(recovered["attempts"][0]["receipt"]["mode"], "live");
+    assert_eq!(recovered["attempts"][0]["state"], "uncertain");
+    assert!(
+        s.autonomous_social_command_live(id(3), "resume", grant_body.clone())
+            .await
+            .is_err()
+    );
+    for op in ["pause", "stop", "revoke"] {
+        supa_runtime::social_autonomy::live_control(&s, id(3), gid, op, None)
+            .await
+            .unwrap();
+    }
+    let read = s
+        .autonomous_social_command_live(id(3), "read", grant_body)
+        .await
+        .unwrap();
+    assert_eq!(read["grant"]["state"], "revoked");
+    assert_eq!(read["grant"]["reserved"], 25000);
+    for event in read["audit"].as_array().unwrap() {
+        assert_eq!(event["body"]["mode"], "live");
+    }
+    let (bad,broken):(i64,i64)=sqlx::query_as("WITH e AS(SELECT *,lag(sha256,1,repeat('0',64)) OVER(PARTITION BY agent_id ORDER BY id) expected FROM social_autonomy.events) SELECT count(*) FILTER(WHERE sha256<>encode(sha256(convert_to(previous_sha256||body::text,'UTF8')),'hex')),count(*) FILTER(WHERE previous_sha256<>expected) FROM e").fetch_one(a.pool()).await.unwrap();
+    assert_eq!((bad, broken), (0, 0));
+    assert!(
+        sqlx::query("UPDATE social_autonomy.grants SET reserved=0")
+            .execute(s.pool())
+            .await
+            .is_err()
+    );
 }
