@@ -215,6 +215,28 @@ async fn run() -> Result<()> {
         );
         return Ok(());
     }
+    if args == ["ledger-check"] {
+        let _ = identity(false).map_err(|_| {
+            eprintln!("ledger_identity_evidence_unavailable");
+            Error::Denied
+        })?;
+        let url = std::env::var("DATABASE_URL").map_err(|_| Error::Denied)?;
+        let store = Store::connect_first_post_local(&url, false)
+            .await
+            .map_err(|_| {
+                eprintln!("ledger_local_database_connection_or_identity_failed");
+                Error::Denied
+            })?;
+        store.verify_first_post_runtime_role().await.map_err(|_| {
+            eprintln!("ledger_restricted_role_check_failed");
+            Error::Denied
+        })?;
+        println!(
+            "{}",
+            json!({"database":"supa_x_first_post","database_target_verified":true,"restricted_role_verified":true,"private_identity_receipt_verified":true,"database_writes":0,"X_api_requests":0,"publishing_enabled":false,"permissions":"owner console confirmation required","credits":"owner console confirmation required"})
+        );
+        return Ok(());
+    }
     let recover = args
         .first()
         .is_some_and(|s| s == "recover" || s == "mock-recover");
