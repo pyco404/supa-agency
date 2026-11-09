@@ -44,7 +44,7 @@ export function publicLandingRequest(request: Request): boolean {
     || ["/style.css", "/app.js", "/scene.js", "/wheel.js", "/platform.js"].includes(path)
     || /^\/public\/(assets\/[a-z0-9-]+\.svg|fonts\/[a-zA-Z0-9._-]+\.(woff2|ttf|txt))$/.test(path)
     || /^\/public\/assets\/supa-(home|agents|intelligence|memory|economy|social|trading|factory|about)-(?:(thumb|480|960)\.webp|960\.avif)$/.test(path)
-    || /^\/public\/assets\/supa-(economy|social|trading|factory)-loop\.(webm|mp4)$/.test(path);
+    || /^\/public\/assets\/supa-((economy|social|trading|factory)-loop|factory-artwork-loop)\.(webm|mp4)$/.test(path);
 }
 
 export function localRequest(request: Request): boolean {
