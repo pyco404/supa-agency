@@ -134,6 +134,13 @@ impl PrivateKeyring {
         connection.validate(auth)?;
         Ok(connection)
     }
+    pub(crate) fn read_oauth1_env(&self) -> Result<Zeroizing<Vec<u8>>> {
+        self.call(
+            "backend-read-oauth1-env",
+            &serde_json::json!({"owner":self.owner,"client_id":crate::x_review::oauth1::NAMESPACE}),
+        )
+    }
+    #[cfg(test)]
     pub(crate) fn read_oauth1(&self) -> Result<Zeroizing<Vec<u8>>> {
         self.call(
             "backend-read-oauth1",
