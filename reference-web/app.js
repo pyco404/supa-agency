@@ -1,9 +1,9 @@
 // Supa Agency / SUPA
 // One agent. One purpose. One token.
 // Persistent agents. Application-enforced permissions.
-import { createWheel } from './wheel.js';
+import { createWheel, createCardMedia } from './wheel.js';
 import { createScenes } from './scene.js';
-import { navigation as privateNavigation, publicNavigation, publicSectionView, sectionArtwork, githubNotice, overview, sectionView, read, units } from './platform.js';
+import { navigation as privateNavigation, publicNavigation, publicSectionView, sectionArtwork, navigationMotion, githubNotice, overview, sectionView, read, units } from './platform.js';
 
 const $ = selector => document.querySelector(selector);
 const root = document.documentElement;
@@ -16,9 +16,25 @@ function repeatSection(id){
   const repeat=typedSections.has(id);typedSections.add(id);
   return repeat;
 }
+// Only source-matched, approved loops belong in page artwork. Intelligence's
+// Purpose Qualification illustration has no matching loop and remains static.
+const pageArtworkMotion=Object.freeze({factory:navigationMotion.factory});
+const artworkMedia=new Set();
+function clearArtworkMedia(){for(const item of artworkMedia)item.destroy();artworkMedia.clear();}
+function syncArtworkMedia(){for(const item of artworkMedia)item.sync();}
+function animateArtwork(picture,id,poster){
+  if(!pageArtworkMotion[id]||!('IntersectionObserver' in window))return;
+  const media=createCardMedia({thumb:poster,media:pageArtworkMotion[id]});
+  media.element.classList.add('section-motion-media');picture.append(media.element);
+  let visible=false;
+  const item={sync(){media.setActive(visible&&picture.isConnected&&!reduced.matches&&!document.hidden&&document.body.dataset.view==='projects'&&!$('.pane').inert);},destroy(){observer.disconnect();media.destroy();}};
+  const observer=new IntersectionObserver(entries=>{visible=entries.some(entry=>entry.isIntersecting);item.sync();},{threshold:0});
+  artworkMedia.add(item);observer.observe(picture);
+}
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-reduced.addEventListener('change', event => { root.dataset.motion=event.matches?'still':'running';if(event.matches)revealTyping?.(); });
+reduced.addEventListener('change', event => { root.dataset.motion=event.matches?'still':'running';syncArtworkMedia();if(event.matches)revealTyping?.(); });
 root.dataset.motion = reduced.matches?'still':'running';
+document.addEventListener('visibilitychange',syncArtworkMedia);
 const node = (tag,className,text) => { const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=String(text);return el; };
 const palettes=[['#080908','#ded9bd','#aaa58b'],['#0b0b0a','#e6e0cf','#a7a18f'],['#0a0c08','#d9dbc3','#a7ac90']];
 let sceneData, revealTyping=null;
@@ -152,7 +168,7 @@ function updateOfficialMetadata(path){
 function setView(projects){
   closeAgentPicker();
   entryAttempt++;leaving=false;scenes?.cancelWarp();cancelTyping();renderVersion++;$('.buffer').setAttribute('aria-busy','false');
-  if(!projects){document.title='Supa Agency — One agent. One purpose. One token.';updateOfficialMetadata('/');}
+  if(!projects){clearArtworkMedia();document.title='Supa Agency — One agent. One purpose. One token.';updateOfficialMetadata('/');}
   document.body.dataset.view=projects?'projects':'intro';$('.intro').hidden=projects;$('.projects').hidden=!projects;closeCommand(false);setDrawer(false,false);scenes?.setMode(projects?'projects':'intro');
   if(projects){void select(itemIndex);requestAnimationFrame(()=>{window.dispatchEvent(new Event('resize'));wheel.reveal();$('.buffer').focus({preventScroll:true});});}
 }
@@ -189,7 +205,7 @@ function setDrawer(open,focus=true){
   $('.projects').classList.toggle('drawer-open',open);$('.tabline').setAttribute('aria-expanded',String(open));$('.menu-indicator').textContent=open?'×':'☰';
   $('.tabline').setAttribute('aria-label',open?'Close navigation':'Open navigation');
   document.body.classList.toggle('menu-open',open);
-  $('.pane').inert=open;$('.bar').inert=open;
+  $('.pane').inert=open;$('.bar').inert=open;syncArtworkMedia();
   if(focus)(open?$('.wheel'):$('.tabline')).focus({preventScroll:true});
   requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));
 }
@@ -211,7 +227,7 @@ async function select(index,background=false){
   const buffer=$('.buffer');
   if(!background){
     $('.tab-file').textContent=item.label.split(' · ')[0];$('.winbar').textContent=`supa@${publicLanding?'public':'local'} — ${item.label} / read-only`;
-    buffer.replaceChildren();buffer.setAttribute('aria-busy','true');buffer.dataset.typingState='loading';
+    clearArtworkMedia();buffer.replaceChildren();buffer.setAttribute('aria-busy','true');buffer.dataset.typingState='loading';
     $('.blueprint').hidden=item.id!=='home';scenes?.setSelection(index);
     line(`supa@${publicLanding?'public':'local'} ~`,'prompt');line(publicLanding?'Opening public view…':'Loading saved view…','prompt');
   }
@@ -225,7 +241,7 @@ async function select(index,background=false){
   if(background&&buffer.querySelector('form[data-unsaved-changes=true]'))return;
   if(background&&(fingerprint===viewFingerprint||buffer.contains(document.activeElement)||!$('.command').hidden||buffer.getAttribute('aria-busy')==='true'))return;
   viewFingerprint=fingerprint;if(background)cancelTyping();
-  buffer.replaceChildren();line(`supa@${publicLanding?'public':'local'} ~`,'prompt');
+  clearArtworkMedia();buffer.replaceChildren();line(`supa@${publicLanding?'public':'local'} ~`,'prompt');
   if(item.id==='about')buffer.append($('#terminal-architecture-template').content.firstElementChild.cloneNode(true));
   for(const row of rows){
     if(row.kind==='agent'){
@@ -241,7 +257,9 @@ async function select(index,background=false){
       image.sizes='(max-width:700px) calc(100vw - 56px), (max-width:1100px) 55vw, 604px';
       image.srcset=`${stem}-480.webp 480w, ${stem}-960.webp 960w`;image.src=`${stem}-480.webp`;
       picture.append(source,image);caption.append(node('span','section-art-title',artwork.title),node('span','','Concept artwork / not live activity'));
-      figure.append(picture,caption);buffer.append(figure);
+      const frame=node('div','section-art-media');frame.append(picture);
+      figure.append(frame,caption);buffer.append(figure);
+      animateArtwork(frame,row.id,`${stem}-960.webp`);
     }else if(row.kind==='autonomy')buffer.append(autonomyPanel(row.policy));
     else if(row.kind==='economy')buffer.append(economyPanel(row.view,row.agentId));
     else if(row.kind==='livework')buffer.append(liveWorkPanel(row.view,row.agentId));
@@ -547,7 +565,7 @@ window.addEventListener('keydown',async event=>{
   else if(event.key==='g')$('.buffer').scrollTo({top:0});
   else if(event.key==='G')$('.buffer').scrollTo({top:$('.buffer').scrollHeight});
 });
-window.addEventListener('pagehide',event=>{if(!event.persisted){clearInterval(liveTimer);cancelTyping();wheel?.destroy();scenes?.destroy();}});
+window.addEventListener('pagehide',event=>{if(!event.persisted){clearInterval(liveTimer);cancelTyping();clearArtworkMedia();wheel?.destroy();scenes?.destroy();}});
 
 function liveWorkPanel(view,id){
   const panel=node('details','calculation autonomy-panel');panel.dataset.liveWork='evaluation';const providerName=view.policy?.model?.startsWith('claude-')?'Claude':'GPT';panel.append(node('summary','',`${providerName} work evaluation / separate inference accounting`));
