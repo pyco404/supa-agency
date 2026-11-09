@@ -503,3 +503,62 @@ async fn oauth1_identity_signatures_and_account_checks_use_only_mock_https_gets(
         assert_eq!(fixture.calls(), 1, "one GET, zero posts or retries: {mode}");
     }
 }
+
+#[tokio::test]
+async fn oauth1_posting_real_tls_preserves_exact_guard_errors_and_single_attempt() {
+    for (mode, state, status, calls) in [
+        ("oauth1_post_ok", "posted", Some(201), 2),
+        ("oauth1_post_account", "failed", None, 1),
+        ("oauth1_post_permission", "failed", Some(403), 2),
+        ("oauth1_post_expired", "failed", Some(401), 2),
+        ("oauth1_post_rate", "failed", Some(429), 2),
+        ("oauth1_post_credits", "failed", Some(402), 2),
+        ("oauth1_post_server", "uncertain", Some(503), 2),
+        ("oauth1_post_redirect", "uncertain", Some(302), 2),
+        ("oauth1_post_disconnect", "uncertain", None, 2),
+        ("oauth1_post_slow", "uncertain", None, 2),
+        ("oauth1_post_oversize", "uncertain", None, 2),
+        ("oauth1_post_malformed", "uncertain", Some(201), 2),
+        ("oauth1_post_bad_id", "uncertain", Some(201), 2),
+    ] {
+        let fixture = TlsFixture::new(mode);
+        let result = crate::x_review::oauth1::test_posting(
+            fixture.transport(true).client,
+            &format!("https://127.0.0.1:{}", fixture.port),
+            true,
+        )
+        .await;
+        assert_eq!(result.state, state, "{mode}");
+        assert_eq!(result.http_status, status, "{mode}");
+        assert_eq!(result.mode, "live");
+        let stats: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(fixture.root.path().join("stats.json")).unwrap())
+                .unwrap();
+        assert_eq!(stats["calls"], calls, "{mode}");
+        assert_eq!(
+            stats["posting_calls"],
+            if calls == 2 { 1 } else { 0 },
+            "{mode}"
+        );
+        if mode == "oauth1_post_rate" {
+            assert_eq!(result.rate_limit_reset, Some(123456));
+        }
+        if mode == "oauth1_post_credits" {
+            assert_eq!(result.category, "insufficient_credits_no_retry");
+        }
+        if state == "posted" {
+            assert_eq!(result.post_id.as_deref(), Some("456"));
+        }
+    }
+    for (trusted, allowed, calls) in [(false, true, 0), (true, false, 0)] {
+        let fixture = TlsFixture::new("oauth1_post_ok");
+        let result = crate::x_review::oauth1::test_posting(
+            fixture.transport(trusted).client,
+            &format!("https://127.0.0.1:{}", fixture.port),
+            allowed,
+        )
+        .await;
+        assert_eq!(result.state, "failed");
+        assert_eq!(fixture.calls(), calls);
+    }
+}
