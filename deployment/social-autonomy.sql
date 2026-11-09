@@ -1,5 +1,5 @@
--- LOCAL MOCK VALIDATION ONLY. Explicit additive extension; no automatic migration/grant.
--- Requires social-review.sql. No real OAuth binding or production dispatch exists.
+-- Explicit additive extension; no automatic migration, policy enrollment or grant.
+-- Live dispatch additionally requires root-installed owner activation and keyring custody.
 BEGIN;
 CREATE SCHEMA social_autonomy;
 REVOKE ALL ON SCHEMA social_autonomy FROM PUBLIC;
@@ -12,7 +12,7 @@ CREATE TABLE social_autonomy.grants (
  interval_seconds integer NOT NULL CHECK(interval_seconds BETWEEN 14400 AND 86400),
  budget bigint NOT NULL CHECK(budget BETWEEN 25000 AND 10000000),
  reserved bigint NOT NULL DEFAULT 0 CHECK(reserved>=0 AND reserved<=budget),
- CHECK(account->>'mode'='mock' AND account->>'username'='supa_agency'),
+ CHECK(account->>'mode' IN ('mock','live') AND account->>'username'='supa_agency'),
  CHECK(authorization_sha256=encode(sha256(convert_to(grant_body::text,'UTF8')),'hex'))
 );
 CREATE TABLE social_autonomy.attempts (
@@ -32,13 +32,18 @@ CREATE TABLE social_autonomy.events (
  CHECK(sha256=encode(sha256(convert_to(previous_sha256||body::text,'UTF8')),'hex'))
 );
 REVOKE ALL ON ALL TABLES IN SCHEMA social_autonomy FROM PUBLIC;
+CREATE FUNCTION social_autonomy.policy_mode(actor uuid) RETURNS text
+LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog AS $$
+ SELECT account->>'mode' FROM social_review.policies WHERE owner_id=actor AND enabled
+$$;
+REVOKE ALL ON FUNCTION social_autonomy.policy_mode(uuid) FROM PUBLIC;
 CREATE FUNCTION social_autonomy.audit(actor uuid, agent uuid, operation text, details jsonb) RETURNS void
 LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 DECLARE previous text; body jsonb;
 BEGIN
  SELECT sha256 INTO previous FROM social_autonomy.events WHERE agent_id=agent ORDER BY id DESC LIMIT 1;
  previous=coalesce(previous,repeat('0',64));
- body=jsonb_build_object('operation',operation,'actor',actor,'details',details,'recorded_at',clock_timestamp(),'mode','mock');
+ body=jsonb_build_object('operation',operation,'actor',actor,'details',details,'recorded_at',clock_timestamp(),'mode',(SELECT account->>'mode' FROM social_review.policies WHERE agent_id=agent));
  INSERT INTO social_autonomy.events(agent_id,actor,body,previous_sha256,sha256)
  VALUES(agent,actor,body,previous,encode(sha256(convert_to(previous||body::text,'UTF8')),'hex'));
 END $$;
@@ -66,11 +71,14 @@ BEGIN
    IF g.owner_id<>actor OR g.grant_body IS DISTINCT FROM b THEN RAISE EXCEPTION 'grant_conflict' USING ERRCODE='40001'; END IF;
    RETURN to_jsonb(g);
   END IF;
-  IF b-ARRAY['grant_id','account','confirmed','scope','expires_at','max_posts','interval_seconds','budget_microusd']<>'{}'::jsonb
+  IF b-ARRAY['grant_id','account','confirmed','scope','expires_at','max_posts','interval_seconds','budget_microusd','activation_receipt_id','owner_proof_sha256']<>'{}'::jsonb
    OR chosen IS NULL OR chosen='00000000-0000-0000-0000-000000000000'::uuid OR b->'confirmed' IS DISTINCT FROM 'true'::jsonb
    OR b->>'scope' IS DISTINCT FROM 'original_text_released_metadata_only' OR b->'account' IS DISTINCT FROM p.account
-   OR b->'account'->>'mode' IS DISTINCT FROM 'mock' OR (b->>'expires_at')::timestamptz<=now_at
+   OR coalesce(b->'account'->>'mode','') NOT IN ('mock','live') OR (b->>'expires_at')::timestamptz<=now_at
    OR (b->>'expires_at')::timestamptz>now_at+interval '7 days'
+   OR (p.account->>'mode'='live' AND ((b->>'activation_receipt_id') IS NULL OR (b->>'activation_receipt_id')::uuid='00000000-0000-0000-0000-000000000000'::uuid
+      OR coalesce(b->>'owner_proof_sha256','') !~ '^[0-9a-f]{64}$'))
+   OR (p.account->>'mode'='mock' AND b ?| ARRAY['activation_receipt_id','owner_proof_sha256'])
   THEN RAISE EXCEPTION 'grant_scope_denied' USING ERRCODE='42501'; END IF;
   INSERT INTO social_autonomy.grants(id,agent_id,owner_id,account,grant_body,authorization_sha256,expires_at,max_posts,interval_seconds,budget)
   VALUES(chosen,p.agent_id,actor,p.account,b,encode(sha256(convert_to(b::text,'UTF8')),'hex'),(b->>'expires_at')::timestamptz,
@@ -90,7 +98,7 @@ BEGIN
   RETURN to_jsonb(g);
  END IF;
  IF op='recover' THEN
-  UPDATE social_autonomy.attempts SET state='uncertain',receipt='{"mode":"mock","state":"uncertain","category":"restart_unconfirmed_no_retry"}'
+  UPDATE social_autonomy.attempts SET state='uncertain',receipt=jsonb_build_object('mode',g.account->>'mode','state','uncertain','category','restart_unconfirmed_no_retry')
    WHERE grant_id=chosen AND state IN ('reserved','in_flight');
   IF FOUND THEN UPDATE social_autonomy.grants SET state=CASE WHEN state='active' THEN 'paused' ELSE state END WHERE id=chosen; END IF;
   PERFORM social_autonomy.audit(actor,p.agent_id,op,jsonb_build_object('grant_id',chosen));
@@ -107,8 +115,8 @@ BEGIN
  FROM social_autonomy.attempts WHERE account_id=p.account->>'id' AND receipt->>'http_status'='429';
  IF op IN ('read','recover') THEN
   SELECT * INTO g FROM social_autonomy.grants WHERE id=chosen;
-  RETURN jsonb_build_object('mode','mock','publishing_enabled',false,'grant',to_jsonb(g),'context',c,'context_sha256',encode(sha256(convert_to(c::text,'UTF8')),'hex'),
-   'due',g.state='active' AND g.expires_at>now_at AND g.next_at<=now_at
+  RETURN jsonb_build_object('mode',g.account->>'mode','publishing_enabled',false,'grant',to_jsonb(g),'context',c,'context_sha256',encode(sha256(convert_to(c::text,'UTF8')),'hex'),
+   'due',(g.account->>'mode'<>'live' OR (c->>'paused')::boolean IS NOT DISTINCT FROM false) AND g.state='active' AND g.expires_at>now_at AND g.next_at<=now_at
     AND g.reserved+25000<=g.budget AND count_recent<g.max_posts
     AND (latest IS NULL OR latest<=now_at-make_interval(secs=>g.interval_seconds+8))
     AND (reset_at IS NULL OR reset_at<=now_at)
@@ -120,7 +128,7 @@ BEGIN
  SELECT * INTO a FROM social_autonomy.attempts WHERE id=(b->>'attempt_id')::uuid AND grant_id=chosen FOR UPDATE;
  IF op='finish' THEN
   r=b->'receipt';
-  IF a.id IS NULL OR a.state NOT IN ('reserved','in_flight') OR r->>'mode' IS DISTINCT FROM 'mock'
+  IF a.id IS NULL OR a.state NOT IN ('reserved','in_flight') OR r->>'mode' IS DISTINCT FROM g.account->>'mode'
    OR r->>'state' NOT IN ('posted','failed','uncertain') OR (r->>'state'='posted' AND a.state<>'in_flight')
   THEN RAISE EXCEPTION 'receipt_denied' USING ERRCODE='42501'; END IF;
   UPDATE social_autonomy.attempts SET state=r->>'state',receipt=r WHERE id=a.id;
@@ -128,12 +136,13 @@ BEGIN
    r=jsonb_set(r,'{rate_limit_reset}',to_jsonb(extract(epoch from now_at+interval '24 hours')::bigint));
    UPDATE social_autonomy.attempts SET receipt=r WHERE id=a.id;
   END IF;
-  IF r->>'state'='uncertain' OR r->>'category'='account_mismatch' OR r->>'http_status' IN ('401','403') THEN UPDATE social_autonomy.grants SET state=CASE WHEN state='active' THEN 'paused' ELSE state END WHERE id=chosen; END IF;
+  IF r->>'state'='uncertain' OR r->>'category'='account_mismatch' OR r->>'http_status' IN ('401','402','403') THEN UPDATE social_autonomy.grants SET state=CASE WHEN state='active' THEN 'paused' ELSE state END WHERE id=chosen; END IF;
   PERFORM social_autonomy.audit(actor,p.agent_id,op,jsonb_build_object('attempt_id',a.id,'receipt',r));
   RETURN r;
  END IF;
  IF g.state<>'active' OR g.expires_at<=now_at THEN RAISE EXCEPTION 'authorization_inactive' USING ERRCODE='42501'; END IF;
  IF op='guard' THEN
+  IF g.account->>'mode'='live' AND (c->>'paused')::boolean IS DISTINCT FROM false THEN RAISE EXCEPTION 'social_emergency_pause' USING ERRCODE='42501'; END IF;
   IF a.id IS NULL OR a.state<>'reserved' OR a.text_sha256 IS DISTINCT FROM b->>'text_sha256' OR b->'account' IS DISTINCT FROM g.account
    OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(a.decision->'event_ids') ref
     WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(c->'sources') src WHERE src->'event'->>'id'=ref AND src->'released'='true'::jsonb))
