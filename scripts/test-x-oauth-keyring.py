@@ -38,6 +38,19 @@ class Fake:
 
 
 class Contracts(unittest.TestCase):
+    def test_dotenv_reader_bypasses_keyring_and_is_owner_bound(self):
+        from types import SimpleNamespace
+        bundle={key:'synthetic-dotenv-fixture' for key in m.OAUTH1_FIELDS}
+        config=SimpleNamespace(oauth1_credentials=lambda:dict(bundle))
+        body=dict(owner=m.LOCAL_OWNER,client_id=m.OAUTH1_NAMESPACE)
+        with patch.object(m,'local_session',return_value={'uid':1000,'session_id':'fixture'}), patch.object(m,'dotenv_config',return_value=config):
+            self.assertEqual(m.ipc('backend-read-oauth1-env',None,body),bundle)
+            for bad in [dict(body,owner=OWNER),dict(body,client_id=CLIENT),dict(body,extra=True)]:
+                with self.assertRaises(ValueError):m.ipc('backend-read-oauth1-env',None,bad)
+        with patch.object(m,'local_session',side_effect=ValueError('denied')), patch.object(m,'dotenv_config') as loader:
+            with self.assertRaises(ValueError):m.ipc('backend-read-oauth1-env',None,body)
+            loader.assert_not_called()
+
     def setup_store(self):
         store = Fake()
         values = iter([OWNER, CLIENT, SECRET, SECRET])
