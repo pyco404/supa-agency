@@ -46,7 +46,7 @@ impl XReceipt {
         }
     }
 }
-/// Mock responses only. Never retain/log a raw body or request credentials.
+/// Shared bounded transport response. Never log a raw body or credentials.
 pub struct MockResponse {
     pub status: u16,
     pub body: Vec<u8>,
@@ -65,7 +65,8 @@ pub trait MockXTransport: Send + Sync {
 pub trait MockDispatchGuard: Send + Sync {
     async fn authorize_exact(&self, text_sha256: &str, account: &MockAccount) -> Result<()>;
 }
-/// Owns a secret only in local mock tests; deliberately no Debug/Serialize/Clone.
+/// One-shot protocol. Public construction is mock-only; live custody stays private.
+/// Deliberately no Debug/Serialize/Clone.
 pub struct MockXAdapter<T: MockXTransport> {
     transport: T,
     credential: Zeroizing<String>,
@@ -196,6 +197,7 @@ impl<T: MockXTransport> MockXAdapter<T> {
                     if let Some(id) = value["data"]["id"].as_str() {
                         if value.get("errors").is_none()
                             && value["data"]["text"] == text
+                            && (self.account.mode != "live" || live::numeric_id(id))
                             && !id.is_empty()
                             && id.len() <= 24
                             && id.bytes().all(|b| b.is_ascii_digit())
