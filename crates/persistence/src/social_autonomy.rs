@@ -33,6 +33,15 @@ impl AutonomousSocialGrant {
     }
 }
 impl Store {
+    /// Function-only worker authority, checked before any hosted scheduler use.
+    pub async fn verify_autonomous_runtime_role(&self) -> Result<()> {
+        let safe:bool=sqlx::query_scalar("SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls) AND NOT EXISTS(SELECT 1 FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname=current_user)) AND NOT has_database_privilege(current_database(),'CREATE') AND NOT has_schema_privilege(current_user,'public','CREATE') AND has_function_privilege(current_user,'social_autonomy.command(uuid,text,jsonb)','EXECUTE') AND has_function_privilege(current_user,'social_autonomy.policy_mode(uuid)','EXECUTE') AND NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')) FROM pg_roles WHERE rolname=current_user")
+            .fetch_one(self.pool()).await.map_err(|_|Error::Denied)?;
+        if !safe {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    }
     pub async fn autonomous_social_authorize_mock(
         &self,
         actor: Uuid,
