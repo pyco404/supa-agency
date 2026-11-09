@@ -351,6 +351,15 @@ impl MockXTransport for AuthorizedTransport<'_> {
 /// Does not perform a paid identity read or refresh.
 pub fn verify_connection(auth: &LiveAuthorization) -> Result<u64> {
     auth.check()?;
+    if auth.client_id() == super::oauth1::NAMESPACE {
+        let session =
+            crate::x_oauth::local::authorization::AuthorizationReceipt::local_owner_session(
+                super::oauth1::NAMESPACE,
+            )?;
+        super::oauth1::credentials_available(&session)?;
+        auth.check()?;
+        return Ok(auth.expires_unix());
+    }
     let connection = PrivateKeyring::new(auth.owner())?.posting_connection(auth)?;
     connection.validate(auth)?;
     auth.check()?;
@@ -365,6 +374,41 @@ pub async fn dispatch_reserved_once(
     guard: &dyn MockDispatchGuard,
 ) -> Result<XReceipt> {
     auth.check()?;
+    if auth.client_id() == super::oauth1::NAMESPACE {
+        let session =
+            crate::x_oauth::local::authorization::AuthorizationReceipt::local_owner_session(
+                super::oauth1::NAMESPACE,
+            )?;
+        // Keep the root authorization/revocation check on BOTH transport stages.
+        struct Guard<'a> {
+            auth: &'a LiveAuthorization,
+            durable: &'a dyn MockDispatchGuard,
+        }
+        #[async_trait]
+        impl MockDispatchGuard for Guard<'_> {
+            async fn authorize_exact(&self, hash: &str, account: &MockAccount) -> Result<()> {
+                self.auth.check()?;
+                self.durable.authorize_exact(hash, account).await
+            }
+        }
+        let guarded = Guard {
+            auth,
+            durable: guard,
+        };
+        return super::oauth1::dispatch_reserved_live(
+            &session,
+            &super::oauth1::ReservedPost {
+                account: auth.account().clone(),
+                text,
+                text_sha256: hash,
+                expires_unix: auth.expires_unix().min(now()?.saturating_add(600)),
+                budget_microusd: 25000,
+            },
+            &guarded,
+            auth,
+        )
+        .await;
+    }
     let connection = PrivateKeyring::new(auth.owner())?.posting_connection(auth)?;
     connection.validate(auth)?;
     let expires = connection.expires_unix.min(auth.expires_unix());
