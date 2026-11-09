@@ -1,0 +1,42 @@
+# Prepared only. Never installed or enabled by the application.
+[Unit]
+Description=Supa Agent bounded X-only publisher
+After=network-online.target postgresql.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=supa-x
+Group=supa-x
+WorkingDirectory=/opt/supa-agent
+EnvironmentFile=/etc/supa-agent/x-autonomy.env
+LoadCredentialEncrypted=oauth1.json:/etc/credstore.encrypted/supa-x-oauth1
+ExecStartPre=/opt/supa-agent/bin/supa-x-autonomy check ${SUPA_X_ACTIVATION_RECEIPT}
+ExecStart=/opt/supa-agent/bin/supa-x-autonomy run ${SUPA_X_ACTIVATION_RECEIPT}
+# Explicit owner action only, using the same protected credential namespace.
+ExecReload=/opt/supa-agent/bin/supa-x-autonomy resume ${SUPA_X_ACTIVATION_RECEIPT}
+# Crash recovery quarantines unfinished attempts. Never auto-authorize or resume.
+Restart=on-failure
+RestartSec=60
+RuntimeMaxSec=24h
+TimeoutStopSec=30
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LimitCORE=0
+MemoryMax=256M
+CPUQuota=25%
+TasksMax=64
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
