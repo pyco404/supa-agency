@@ -1,5 +1,5 @@
-//! X v2 protocol preparation. Production authentication/posting is unavailable.
-//! Only injected mock transports are used; no environment credential lookup.
+//! Shared one-attempt X v2 protocol; live custody and authority are isolated below.
+pub mod live;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -97,6 +97,31 @@ impl<T: MockXTransport> MockXAdapter<T> {
             attempted: AtomicBool::new(false),
         })
     }
+    fn prepared_live(
+        transport: T,
+        credential: Zeroizing<String>,
+        account: MockAccount,
+        expires_unix: u64,
+    ) -> Result<Self> {
+        if account.mode != "live"
+            || account.username != "supa_agency"
+            || !live::numeric_id(&account.id)
+        {
+            return Err(Error::Denied);
+        }
+        Ok(Self {
+            transport,
+            credential,
+            account,
+            expires_unix,
+            attempted: AtomicBool::new(false),
+        })
+    }
+    fn outcome(&self, state: &str, category: &str) -> XReceipt {
+        let mut receipt = XReceipt::outcome(state, category);
+        receipt.mode = self.account.mode.clone();
+        receipt
+    }
     pub async fn execute_reserved_once(
         &self,
         text: &str,
@@ -106,11 +131,11 @@ impl<T: MockXTransport> MockXAdapter<T> {
     ) -> XReceipt {
         let began = std::time::Instant::now();
         if self.attempted.swap(true, Ordering::SeqCst) {
-            return XReceipt::outcome("failed", "attempt_already_consumed");
+            return self.outcome("failed", "attempt_already_consumed");
         }
         let hash = self::text_sha256(text);
         if safe_post(text).is_err() || hash != text_sha256 || now_unix >= self.expires_unix {
-            return XReceipt::outcome("failed", "invalid_text_or_expired_authorization");
+            return self.outcome("failed", "invalid_text_or_expired_authorization");
         }
         let identity = match tokio::time::timeout(
             std::time::Duration::from_secs(3),
@@ -120,23 +145,23 @@ impl<T: MockXTransport> MockXAdapter<T> {
         .await
         {
             Ok(Ok(r)) => r,
-            _ => return XReceipt::outcome("failed", "identity_unavailable"),
+            _ => return self.outcome("failed", "identity_unavailable"),
         };
         if identity.status != 200 || identity.body.len() > 16384 {
-            let mut receipt = XReceipt::outcome("failed", "identity_unavailable");
+            let mut receipt = self.outcome("failed", "identity_unavailable");
             receipt.http_status = Some(identity.status);
             receipt.rate_limit_reset = identity.rate_limit_reset;
             return receipt;
         }
         let identity: Value = match serde_json::from_slice(&identity.body) {
             Ok(v) => v,
-            Err(_) => return XReceipt::outcome("failed", "identity_invalid"),
+            Err(_) => return self.outcome("failed", "identity_invalid"),
         };
         if identity.get("errors").is_some()
             || identity["data"]["id"] != self.account.id
             || identity["data"]["username"] != self.account.username
         {
-            return XReceipt::outcome("failed", "account_mismatch");
+            return self.outcome("failed", "account_mismatch");
         }
         if !matches!(
             tokio::time::timeout(
@@ -146,11 +171,11 @@ impl<T: MockXTransport> MockXAdapter<T> {
             .await,
             Ok(Ok(()))
         ) {
-            return XReceipt::outcome("failed", "approval_revoked_or_unavailable");
+            return self.outcome("failed", "approval_revoked_or_unavailable");
         }
         // Identity/guard observations cannot extend the approved lifetime.
         if now_unix.saturating_add(began.elapsed().as_secs()) >= self.expires_unix {
-            return XReceipt::outcome("failed", "authorization_expired_before_post");
+            return self.outcome("failed", "authorization_expired_before_post");
         }
         let response = match tokio::time::timeout(
             std::time::Duration::from_secs(3),
@@ -160,9 +185,9 @@ impl<T: MockXTransport> MockXAdapter<T> {
         .await
         {
             Ok(Ok(r)) => r,
-            _ => return XReceipt::outcome("uncertain", "ambiguous_transport_no_retry"),
+            _ => return self.outcome("uncertain", "ambiguous_transport_no_retry"),
         };
-        let mut receipt = XReceipt::outcome("uncertain", "unverified_post_response");
+        let mut receipt = self.outcome("uncertain", "unverified_post_response");
         receipt.http_status = Some(response.status);
         receipt.rate_limit_reset = response.rate_limit_reset;
         match response.status {
@@ -176,15 +201,22 @@ impl<T: MockXTransport> MockXAdapter<T> {
                             && id.bytes().all(|b| b.is_ascii_digit())
                         {
                             receipt.state = "posted".into();
-                            receipt.category = "mock_post_receipt".into();
+                            receipt.category = if self.account.mode == "live" {
+                                "verified_post_receipt"
+                            } else {
+                                "mock_post_receipt"
+                            }
+                            .into();
                             receipt.post_id = Some(id.into());
                         }
                     }
                 }
             }
-            400 | 401 | 403 | 404 | 422 | 429 => {
+            400 | 401 | 402 | 403 | 404 | 422 | 429 => {
                 receipt.state = "failed".into();
-                receipt.category = if response.status == 429 {
+                receipt.category = if response.status == 402 {
+                    "insufficient_credits_no_retry"
+                } else if response.status == 429 {
                     "rate_limited_no_retry"
                 } else {
                     "request_rejected_no_retry"
@@ -196,7 +228,7 @@ impl<T: MockXTransport> MockXAdapter<T> {
         receipt
     }
 }
-/// There is deliberately no live client constructor or credential loader.
+/// Legacy activation entry remains disabled; live use requires a root-installed receipt.
 pub fn production_posting() -> Result<()> {
     Err(Error::Denied)
 }
