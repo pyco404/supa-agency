@@ -20,10 +20,18 @@ async function select(page,section,mobile){
 }
 const sample=page=>page.locator('video').evaluate(v=>({time:v.currentTime,frames:v.getVideoPlaybackQuality().totalVideoFrames,dropped:v.getVideoPlaybackQuality().droppedVideoFrames,paused:v.paused,src:new URL(v.currentSrc).pathname,controls:v.controls,muted:v.muted,loop:v.loop,inline:v.playsInline,width:v.videoWidth,height:v.videoHeight,seconds:v.duration}));
 try{
- for(const mobile of [false,true]){
-  const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1440,height:1000},isMobile:mobile,hasTouch:mobile,reducedMotion:'no-preference'});
+ for(const viewport of ['desktop','tablet','mobile']){
+  const mobile=viewport==='mobile';
+  const context=await browser.newContext({viewport:mobile?{width:390,height:844}:viewport==='tablet'?{width:768,height:1024}:{width:1440,height:1000},isMobile:mobile,hasTouch:mobile,reducedMotion:'no-preference'});
   const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.name));
-  if(!mobile)for(const section of sections)for(const ext of ['webm','mp4']){
+  const writes=[],privateReads=[];
+  page.on('request',request=>{
+   const path=new URL(request.url()).pathname;
+   if(!['GET','HEAD'].includes(request.method()))writes.push(path);
+   if(path.startsWith('/api/')&&!['/api/status','/api/agents'].includes(path))privateReads.push(path);
+  });
+  if(viewport==='desktop')for(const path of ['/','/agents','/intelligence','/memory','/economy','/social','/trading','/factory','/about'])assert.equal((await context.request.get(base+path)).status(),200,'public_section_remains_open');
+  if(viewport==='desktop')for(const section of sections)for(const ext of ['webm','mp4']){
    const path=`/public/assets/supa-${section}-loop.${ext}`,r=await context.request.get(base+path);
    assert.equal(r.status(),200);assert.equal(r.headers()['content-type'],'video/'+ext);
    report.assets.push({path,status:r.status(),mime:r.headers()['content-type']});
@@ -41,20 +49,22 @@ try{
    await page.waitForFunction(()=>Number(document.querySelector('video')?.dataset.wraps)>=1,{},{timeout:6000});
    const wrapped=await sample(page);assert(wrapped.frames>after.frames,'loop_decodes_more_frames');
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-   report.playback.push({viewport:mobile?'mobile':'desktop',section,before,after,wrapped,changed_pixels_percent:changedPixels,natural_loop_verified:true});
-   await page.screenshot({path:resolve(out,`${mobile?'mobile':'desktop'}-${section}.png`)});
+   const ratio=(wrapped.dropped-before.dropped)/(wrapped.frames-before.frames);
+   assert(ratio<.2,'steady_state_decoder_drop_budget');
+   report.playback.push({viewport,section,before,after,wrapped,changed_pixels_percent:changedPixels,natural_loop_verified:true,decoded_drop_ratio:ratio});
+   await page.screenshot({path:resolve(out,`${viewport}-${section}.png`)});
   }
   // Change selected section using the wheel itself, not a reload.
   await page.locator('.wheel').focus();await page.keyboard.press('ArrowUp');
   await page.waitForFunction(()=>document.querySelector('video')?.currentSrc.includes('social-loop'));
-  report.checks.push({viewport:mobile?'mobile':'desktop',selected_switch:true});
+  report.checks.push({viewport,selected_switch:true});
   await page.locator('.wheel').evaluate(el=>el.style.display='none');await waitFor(page,()=>!document.querySelector('video'));
   await page.locator('.wheel').evaluate(el=>el.style.removeProperty('display'));await waitFor(page,()=>!!document.querySelector('video'));
   await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});await waitFor(page,()=>!document.querySelector('video'));
   await page.evaluate(()=>{delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));});await waitFor(page,()=>!!document.querySelector('video'));
   await page.emulateMedia({reducedMotion:'reduce'});await waitFor(page,()=>!document.querySelector('video'));
   assert(await page.locator('.wheel-item[aria-selected=true] img').isVisible());
-  report.checks.push({viewport:mobile?'mobile':'desktop',offscreen_release:true,hidden_release:true,reduced_motion_poster:true});
+  report.checks.push({viewport,offscreen_release:true,hidden_release:true,reduced_motion_poster:true});
   await page.emulateMedia({reducedMotion:'no-preference'});
   await page.route('**/*-loop.webm',route=>route.fulfill({status:404,body:''}));await select(page,'economy',mobile);
   assert((await sample(page)).src.endsWith('.mp4'),'actual_mp4_decode_required');
@@ -64,7 +74,8 @@ try{
   assert(await page.locator('.wheel-item[aria-selected=true] img').isVisible());
   for(const path of ['/operator','/my-agents'])assert.equal((await context.request.get(base+path)).status(),401);
   assert.deepEqual(errors,[]);
-  report.checks.push({viewport:mobile?'mobile':'desktop',mp4_decode:true,missing_media_poster:true,private_routes_denied:true,javascript_errors:errors});
+  assert.deepEqual(writes,[]);assert.deepEqual(privateReads,[]);
+  report.checks.push({viewport,mp4_decode:true,missing_media_poster:true,private_routes_denied:true,javascript_errors:errors,unexpected_private_reads:privateReads,writes});
   await context.close();
  }
  report.passed=true;
