@@ -35,7 +35,7 @@ async function open(page,path='/economy'){
  if(page.viewportSize().width<=700)await page.locator('.tabline').click();
  await expect(page.locator('.wheel')).toHaveAttribute('data-carousel-state','settled');
 }
-const video=page=>page.locator('.wheel-motion');
+const video=page=>page.locator('.wheel .wheel-motion');
 test.afterEach(async({page})=>{await page.unrouteAll({behavior:'wait'});});
 
 test('only the selected visible card loops, preserves geometry and releases inactive media',async({page},info)=>{
@@ -44,7 +44,7 @@ test('only the selected visible card loops, preserves geometry and releases inac
  await page.locator('.wheel').focus();await page.keyboard.press('End'); // About stays static.
  await expect(video(page)).toHaveCount(0);
  await open(page,'/economy');
- await expect(video(page)).toHaveCount(1);await expect(page.locator('.wheel-media[data-playing=true]')).toHaveCount(1);
+ await expect(video(page)).toHaveCount(1);await expect(page.locator('.wheel .wheel-media[data-playing=true]')).toHaveCount(1);
  const geometry=await video(page).evaluate(v=>{const r=v.getBoundingClientRect(),image=v.parentElement.querySelector('img'),i=image.getBoundingClientRect();return {controls:v.controls,autoplay:v.autoplay,muted:v.muted,inline:v.playsInline,loop:v.loop,fit:getComputedStyle(v).objectFit,width:v.clientWidth,height:v.clientHeight,match:Math.abs(r.width-i.width)<1&&Math.abs(r.height-i.height)<1,clipped:getComputedStyle(v.parentElement).overflow,tab:v.tabIndex};});
  expect(geometry).toMatchObject({controls:false,autoplay:true,muted:true,inline:true,loop:true,fit:'cover',match:true,clipped:'hidden',tab:-1});expect(geometry.width/geometry.height).toBeGreaterThan(1.25);
  // Actual decoder advances, and wraps the four-second fixture without a new source.
@@ -75,7 +75,7 @@ test('reduced motion never fetches clips and preference changes restore posters'
 
 test('MP4 fallback decodes when WebM is unavailable, and total failure preserves poster',async({page})=>{
  await page.emulateMedia({reducedMotion:'no-preference'});const observed=await preview(page,{brokenWebm:true});await open(page);
- await expect(page.locator('.wheel-media[data-playing=true]')).toHaveCount(1);
+ await expect(page.locator('.wheel .wheel-media[data-playing=true]')).toHaveCount(1);
  await expect.poll(()=>video(page).evaluate(v=>v.currentSrc)).toMatch(/\.mp4$/);
  expect(observed.clips.some(p=>p.endsWith('.mp4'))).toBe(true);
  await page.unrouteAll({behavior:'wait'});const failed=await preview(page,{brokenAll:true});await open(page);
@@ -110,7 +110,7 @@ test('autoplay rejection leaves the static fallback without repeated attempts',a
 test('all four published clips play through the real card layer without geometry changes',async({page},info)=>{
  await page.emulateMedia({reducedMotion:'no-preference'});const observed=await preview(page),metrics=[];
  for(const section of ['factory','economy','social','trading']){
-  await open(page,'/'+section);await expect(video(page)).toHaveCount(1);await expect(page.locator('.wheel-media[data-playing=true]')).toHaveCount(1);
+  await open(page,'/'+section);await expect(video(page)).toHaveCount(1);await expect(page.locator('.wheel .wheel-media[data-playing=true]')).toHaveCount(1);
   // Startup/entrance can replace a decoder. Sample steady state after a full
   // second of this decoder and a settled wheel; keep the frame-drop gate intact.
   await expect.poll(()=>video(page).evaluate(v=>v.currentTime)).toBeGreaterThan(1);
