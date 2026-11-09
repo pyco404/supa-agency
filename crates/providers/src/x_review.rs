@@ -1,5 +1,6 @@
 //! Shared one-attempt X v2 protocol; live custody and authority are isolated below.
 pub mod live;
+pub mod oauth1;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
