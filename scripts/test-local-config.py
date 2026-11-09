@@ -80,10 +80,24 @@ class Configuration(unittest.TestCase):
         self.assertEqual(values['SUPA_X_OWNER_ID'],'')
 
     def test_oauth1_configuration_requires_no_oauth2_client_or_platform_owner(self):
-        values=dict(self.values,SUPA_X_CLIENT_ID='',SUPA_X_OWNER_ID='')
+        values=dict(self.values,SUPA_X_CLIENT_ID='',SUPA_X_OWNER_ID='',
+                    **{key:'synthetic-fixture-only' for key in m.OAUTH1_FIELDS})
         self.assertEqual(m.validate(values,'x-oauth1'),[])
-        self.path.write_text(self.template+'\nX_ACCESS_TOKEN=fixture-not-allowed-in-dotenv\n')
-        with self.assertRaises(m.Invalid):m.load(self.root,{})
+        self.path.write_text('\n'.join(key+'='+value for key,value in values.items())+'\n')
+        self.assertEqual(m.oauth1_credentials(self.root),{key:values[key] for key in m.OAUTH1_FIELDS})
+        report=m.oauth1_status(values)
+        self.assertTrue(report['configured'])
+        self.assertNotIn('synthetic-fixture-only',json.dumps(report))
+        for key in m.OAUTH1_FIELDS:
+            for bad in ['', 'contains space', 'x'*1025]:
+                invalid=dict(values,**{key:bad})
+                self.assertFalse(m.oauth1_status(invalid)['configured'])
+                self.assertIn(key,m.validate(invalid,'x-oauth1'))
+        self.assertFalse(m.oauth1_status({})['configured'])
+        self.assertEqual(m.load(self.root,{'X_API_KEY':'export-override'})['X_API_KEY'],'export-override')
+        # Credential IPC always chooses the private file rather than exported overrides.
+        with patch.dict(os.environ, {'X_API_KEY':'export-override'}):
+            self.assertEqual(m.oauth1_credentials(self.root)['X_API_KEY'],'synthetic-fixture-only')
 
     def test_boundaries_disabled_capabilities_and_malformed(self):
         for key in m.DISABLED:
@@ -101,11 +115,12 @@ class Configuration(unittest.TestCase):
             self.assertIn(field, m.validate(dict(self.values, **{field: bad})))
 
     def test_process_isolation_and_commands(self):
-        values = dict(self.values, OPENAI_API_KEY='fixture-secret', SUPA_PLATFORM_MINT_KEYPAIR_PATH='/private/key')
+        values = dict(self.values, **{key:'synthetic-x-fixture-only' for key in m.OAUTH1_FIELDS}, OPENAI_API_KEY='fixture-secret', SUPA_PLATFORM_MINT_KEYPAIR_PATH='/private/key')
         for component in ['web', 'preview', 'x', 'api']:
             argv, cwd, env = m.command(values, component, {'PATH': '/usr/bin', 'OPENAI_API_KEY': 'shell-secret',
                                                          'NODE_OPTIONS': '--inspect=0.0.0.0', 'DATABASE_URL': 'bad'})
             self.assertTrue(argv)
+            for key in m.OAUTH1_FIELDS: self.assertNotIn(key, env)
             self.assertNotIn('NODE_OPTIONS', env)
             self.assertNotIn('OPENAI_API_KEY', env)
             self.assertNotIn('SUPA_PLATFORM_MINT_KEYPAIR_PATH', env)
