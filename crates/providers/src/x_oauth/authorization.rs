@@ -1,8 +1,8 @@
-//! Fixed administrator-owned broker. No environment/path override or local receipt fallback.
+//! X-only local OS-session authority; historical administrator receipts remain verifiable.
 use serde::Deserialize;
 use std::{
     fs,
-    io::Read,
+    io::{IsTerminal, Read},
     os::unix::fs::MetadataExt,
     path::Path,
     process::{Command, Stdio},
@@ -29,6 +29,48 @@ struct Metadata {
 /// Non-cloneable consumed authority, private to this one connection attempt.
 pub struct AuthorizationReceipt {
     metadata: Metadata,
+    local_session: Option<LocalSession>,
+}
+#[derive(Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct LocalSession {
+    uid: u32,
+    session_id: String,
+}
+fn terminal_owner() -> Result<u32> {
+    if !std::io::stdin().is_terminal()
+        || !std::io::stdout().is_terminal()
+        || !std::io::stderr().is_terminal()
+    {
+        return Err(Error::Denied);
+    }
+    let uid = fs::metadata("/proc/self").map_err(|_| Error::Denied)?.uid();
+    let source = fs::metadata(env!("CARGO_MANIFEST_DIR")).map_err(|_| Error::Denied)?;
+    if uid == 0 || source.uid() != uid {
+        return Err(Error::Denied);
+    }
+    for fd in [0, 1, 2] {
+        if fs::metadata(format!("/proc/self/fd/{fd}"))
+            .map_err(|_| Error::Denied)?
+            .uid()
+            != uid
+        {
+            return Err(Error::Denied);
+        }
+    }
+    Ok(uid)
+}
+fn session_metadata(owner: Uuid, client: &str) -> Result<LocalSession> {
+    let uid = terminal_owner()?;
+    let bytes = super::PrivateKeyring::new(owner)?.call(
+        "backend-local-session",
+        &serde_json::json!({"owner":owner,"client_id":client}),
+    )?;
+    let session: LocalSession = serde_json::from_slice(&bytes).map_err(|_| Error::Denied)?;
+    if session.uid != uid || session.session_id.is_empty() {
+        return Err(Error::Denied);
+    }
+    Ok(session)
 }
 impl AuthorizationReceipt {
     pub fn consume(receipt_id: Uuid, owner: Uuid, client: &str) -> Result<Self> {
@@ -44,7 +86,37 @@ impl AuthorizationReceipt {
         }
         let metadata = invoke("consume", receipt_id, owner, client)?;
         validate(&metadata, receipt_id, owner, client)?;
-        Ok(Self { metadata })
+        Ok(Self {
+            metadata,
+            local_session: None,
+        })
+    }
+    /// One non-cloneable connection capability in an authenticated local OS
+    /// session. No platform role, certificate broker or database grant is issued.
+    pub fn local_owner_session(client: &str) -> Result<Self> {
+        let owner = Uuid::parse_str(OWNER).map_err(|_| Error::Denied)?;
+        super::super::OAuthPreparation::public_client(
+            client.into(),
+            super::super::REGISTERED_CALLBACK,
+        )?;
+        let session = session_metadata(owner, client)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| Error::Denied)?
+            .as_secs();
+        let metadata = Metadata {
+            receipt_id: Uuid::new_v4(),
+            owner_id: owner,
+            client_id: client.into(),
+            expires_at: now + 600,
+            proof_nonce: Uuid::new_v4(),
+            consumed_nonce: true,
+            publishing_enabled: false,
+        };
+        Ok(Self {
+            metadata,
+            local_session: Some(session),
+        })
     }
     pub fn expires(&self) -> u64 {
         self.metadata.expires_at
@@ -53,6 +125,18 @@ impl AuthorizationReceipt {
         self.metadata.owner_id == owner && self.metadata.client_id == client
     }
     pub fn check(&self) -> Result<()> {
+        if let Some(original) = &self.local_session {
+            validate(
+                &self.metadata,
+                self.metadata.receipt_id,
+                self.metadata.owner_id,
+                &self.metadata.client_id,
+            )?;
+            if session_metadata(self.metadata.owner_id, &self.metadata.client_id)? != *original {
+                return Err(Error::Denied);
+            }
+            return Ok(());
+        }
         let current = invoke(
             "check",
             self.metadata.receipt_id,
@@ -161,6 +245,11 @@ fn invoke(operation: &str, receipt: Uuid, owner: Uuid, client: &str) -> Result<M
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn local_connection_authority_cannot_be_issued_by_noninteractive_tests_or_for_bad_client() {
+        assert!(AuthorizationReceipt::local_owner_session("bad client").is_err());
+        assert!(AuthorizationReceipt::local_owner_session("fixture_client").is_err());
+    }
     #[test]
     fn receipt_metadata_cannot_substitute_owner_client_nonce_or_expiry() {
         let receipt = Uuid::from_u128(3);
