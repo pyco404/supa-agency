@@ -207,14 +207,25 @@ def command(values, component, shell=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['validate', 'run', 'x-setup', 'x-connect', 'x-oauth1-setup', 'x-oauth1-status', 'x-oauth1-verify', 'x-first-post-prepare', 'x-first-post'])
+    parser.add_argument('action', choices=['validate', 'run', 'x-setup', 'x-connect', 'x-oauth1-setup', 'x-oauth1-status', 'x-oauth1-verify', 'x-first-post-prepare', 'x-first-post-ledger-check', 'x-first-post'])
     parser.add_argument('component', nargs='?', choices=['all', 'api', 'web', 'preview', 'x', 'x-oauth1', 'mint'], default='all')
+    parser.add_argument('--posting-ledger', type=Path)
     parser.add_argument('--authorization-id')
     parser.add_argument('--expires-at', type=int)
     args = parser.parse_args()
     require(args.action == 'x-first-post' or (args.authorization_id is None and args.expires_at is None), 'first_post_options_only')
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     values = load()
+    if args.posting_ledger is not None:
+        require(args.action in ('x-first-post-ledger-check','x-first-post'), 'posting_ledger_only_for_explicit_x_command')
+        path=args.posting_ledger
+        require(path.is_absolute() and not any(parent.is_symlink() for parent in path.parents), 'private_ledger_absolute_path_required')
+        profile=parse(private_read(path,4096).decode('utf-8'))
+        require(set(profile)=={'DATABASE_URL'}, 'posting_ledger_requires_only_database_url')
+        url=profile['DATABASE_URL']
+        require(loopback_url(url,['postgresql'],True) and urlsplit(url).path=='/supa_x_first_post', 'dedicated_local_ledger_required')
+        # Scoped copy only: never rewrite root .env or unrelated application configuration.
+        values=dict(values,DATABASE_URL=url)
     if args.action in ('x-setup', 'x-connect'):
         require(args.component in ('all', 'x'), 'select_x_only_component')
         args.component = 'x'
@@ -245,6 +256,10 @@ def main():
         env = {k:v for k,v in os.environ.items() if k in BASE}
         if args.action == 'x-first-post-prepare':
             argv = [str(binary), 'prepare']
+        elif args.action == 'x-first-post-ledger-check':
+            require(loopback_url(values.get('DATABASE_URL',''),['postgresql'],True), 'local_first_post_database_required')
+            env['DATABASE_URL']=values['DATABASE_URL']
+            argv=[str(binary),'ledger-check']
         else:
             require(all(os.isatty(fd) for fd in [0,1,2]), 'private_owner_terminal_required')
             require(args.authorization_id is not None and args.expires_at is not None, 'exact_authorization_id_and_expiry_required')
