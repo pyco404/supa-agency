@@ -7,7 +7,7 @@ REVOKE ALL ON SCHEMA social_review FROM PUBLIC;
 CREATE TABLE social_review.policies (
  agent_id uuid PRIMARY KEY REFERENCES public.agents(id), owner_id uuid NOT NULL UNIQUE,
  account jsonb NOT NULL CHECK(account ?& ARRAY['username','mode','id'] AND jsonb_typeof(account->'id')='string' AND jsonb_typeof(account->'username')='string' AND jsonb_typeof(account->'mode')='string' AND account-ARRAY['username','mode','id']='{}'::jsonb AND account->>'username'='supa_agency'
-  AND account->>'mode'='mock' AND account->>'id' ~ '^[0-9]{1,24}$'),
+  AND account->>'mode' IN ('mock','live') AND account->>'id' ~ '^[0-9]{1,24}$'),
  enabled boolean NOT NULL DEFAULT false,
  daily_cap integer NOT NULL DEFAULT 3 CHECK(daily_cap BETWEEN 1 AND 3)
 );
@@ -121,7 +121,7 @@ BEGIN
    d.state='approved';d.approval=jsonb_build_object('actor',actor,'text_sha256',d.text_sha256,'account',p.account,'expires_at',client->>'expires_at','approved_at',now_at);
   ELSIF client->>'operation' IN ('reject','request_revision') AND d.state IN ('pending','approved') THEN
    d.state=CASE WHEN client->>'operation'='reject' THEN 'rejected' ELSE 'revision_requested' END;d.approval=NULL;
-  ELSIF client->>'operation'='reserve_mock' AND d.state='approved' THEN
+  ELSIF client->>'operation'='reserve_mock' AND d.state='approved' AND p.account->>'mode'='mock' THEN
    IF (c->>'paused')::boolean IS DISTINCT FROM false OR d.account IS DISTINCT FROM p.account OR d.approval->'account' IS DISTINCT FROM p.account OR d.approval->>'text_sha256' IS DISTINCT FROM d.text_sha256 OR jsonb_typeof(d.approval->'expires_at') IS DISTINCT FROM 'string'
       OR (d.approval->>'expires_at')::timestamptz<=now_at THEN RAISE EXCEPTION 'social_dispatch_denied' USING ERRCODE='42501'; END IF;
    IF (SELECT count(*) FROM social_review.attempts WHERE account_id=p.account->>'id' AND created_at>now_at-interval '24 hours')>=p.daily_cap
