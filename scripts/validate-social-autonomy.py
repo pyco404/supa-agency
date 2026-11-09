@@ -50,11 +50,12 @@ def main():
         env['SUPA_AUTONOMY_TEST_URL']='postgresql://supa_autonomy_test@localhost/supa_autonomy_test?'+urlencode({'host':str(socket),'port':55483})
         run(cargo+['--','--exact','journey','--ignored','--nocapture'],'journey')
         run(cargo+['--','--exact','boundaries','--ignored','--nocapture'],'boundaries')
+        run(cargo+['--','--exact','live_boundaries','--ignored','--nocapture'],'live-boundaries')
         pg('pg_ctl','-D',data,'-m','fast','-w','stop');started=False
         pg('pg_ctl','-D',data,'-l',reports/'postgres.log','-w','start');started=True
         run(cargo+['--','--exact','restart','--ignored','--nocapture'],'restart')
         assert before=={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (ROOT/'migrations').glob('*.sql')}
-        print(json.dumps({'passed':True,'postgres':version,'mock_only':True,'restart_recovery':True,'real_X_requests':0}))
+        print(json.dumps({'passed':True,'postgres':version,'mock_only':True,'live_policy_tested':True,'restart_recovery':True,'real_X_requests':0}))
     finally:
         if started or (data/'postmaster.pid').exists():pg('pg_ctl','-D',data,'-m','fast','-w','stop')
         unchanged = registered==json.loads(subprocess.check_output(['pg_lsclusters','--json']))
