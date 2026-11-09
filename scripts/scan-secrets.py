@@ -202,16 +202,51 @@ def self_test():
     assert not rules(b'\x00\xffunrelated binary payload', [])
     print(json.dumps({'self_tests_passed': 15}))
 
+def frontend_context(root):
+    """Scan a Docker frontend workspace without Git metadata or private dotenv access."""
+    root = root.resolve(strict=True)
+    findings, count, total = [], 0, 0
+    for name in ('.env', 'web/.env', 'web/.env.local'):
+        if (root / name).exists():
+            findings.append({'path': name, 'rule': 'private_configuration_in_build_context'})
+    for name in ('web/src', 'web/public', 'reference-web', 'web/.next/static'):
+        base = root / name
+        if not base.exists() or base.is_symlink():
+            raise RuntimeError('frontend_scan_input_missing')
+        for path in sorted(base.rglob('*')):
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                raise RuntimeError('frontend_scan_symlink_rejected')
+            if not path.is_file():
+                continue
+            count += 1
+            size = path.stat().st_size
+            total += size
+            if count > 10000 or size > 64 * 1024 * 1024 or total > 256 * 1024 * 1024:
+                raise RuntimeError('frontend_scan_limit_exceeded')
+            # Built public chunks are intentionally scanned here; Git policy
+            # continues to forbid tracking .next output in the ordinary mode.
+            checked = relative.removeprefix('web/.next/static/') if name == 'web/.next/static' else relative
+            if protected(checked):
+                findings.append({'path': relative, 'rule': 'private_file_in_frontend'})
+                continue
+            for rule in rules(path.read_bytes(), []):
+                findings.append({'path': relative, 'rule': rule})
+    return {'scanner': 'frontend-source-and-client-bundle-pattern-gate',
+            'files_scanned': count, 'findings': findings, 'passed': not findings,
+            'limitations': 'Pattern checks supplement default-deny Docker context and pre-push history scanning; no production secrets are loaded.'}
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--self-test', action='store_true')
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--frontend-context', type=Path)
     args = parser.parse_args()
     if args.self_test:
         self_test()
         return
     try:
-        report = scan()
+        report = frontend_context(args.frontend_context) if args.frontend_context else scan()
     except Exception:
         print(json.dumps({'passed': False, 'error': 'scanner_failed_without_disclosing_private_values'}))
         raise SystemExit(1)
