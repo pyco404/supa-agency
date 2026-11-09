@@ -403,6 +403,11 @@ fn private_keyring_bridge_reads_and_retains_only_in_disposable_session() {
             unix_now().unwrap() + 600,
         )
         .unwrap();
+    let retained = keyring.call("backend-read-connection", &serde_json::json!({
+        "client_id":"synthetic_confidential_client","owner":Uuid::from_u128(1),"account_id":"123"
+    })).unwrap();
+    let retained: crate::x_review::live::Connection = serde_json::from_slice(&retained).unwrap();
+    assert_eq!(&*retained.access_token, "fixture-access-token-only");
     assert!(
         keyring
             .retain(
@@ -413,4 +418,47 @@ fn private_keyring_bridge_reads_and_retains_only_in_disposable_session() {
             )
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn prepared_posting_uses_real_https_wire_only_against_disposable_fixture() {
+    for (mode, state, status, calls) in [
+        ("posting_ok", "posted", Some(201), 2),
+        ("posting_rate", "failed", Some(429), 2),
+        ("posting_credits", "failed", Some(402), 2),
+        ("posting_expired", "failed", Some(401), 2),
+        ("posting_server", "uncertain", Some(503), 2),
+        ("posting_redirect", "uncertain", Some(302), 2),
+        ("posting_disconnect", "uncertain", None, 2),
+        ("posting_account", "failed", None, 1),
+    ] {
+        let fixture = TlsFixture::new(mode);
+        let transport = fixture.transport(true);
+        let result = crate::x_review::live::test_https_wire(
+            transport.client,
+            &format!("https://127.0.0.1:{}", fixture.port),
+        )
+        .await;
+        assert_eq!(result.mode, "live");
+        assert_eq!(result.state, state, "{mode}");
+        assert_eq!(result.http_status, status, "{mode}");
+        let stats: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(fixture.root.path().join("stats.json")).unwrap())
+                .unwrap();
+        assert_eq!(stats["calls"], calls, "{mode}");
+        assert_eq!(
+            stats["posting_calls"],
+            if calls == 2 { 1 } else { 0 },
+            "{mode}"
+        );
+    }
+    let fixture = TlsFixture::new("posting_ok");
+    let untrusted = fixture.transport(false);
+    let result = crate::x_review::live::test_https_wire(
+        untrusted.client,
+        &format!("https://127.0.0.1:{}", fixture.port),
+    )
+    .await;
+    assert_eq!(result.state, "failed");
+    assert_eq!(fixture.calls(), 0);
 }
