@@ -346,7 +346,7 @@ async fn authorize_reservation(
     post.validate(now()?)?;
     tokio::time::timeout(
         Duration::from_secs(1),
-        guard.authorize_exact(post.text_sha256, &post.account),
+        guard.check_reserved(post.text_sha256, &post.account),
     )
     .await
     .map_err(|_| Error::Denied)??;
@@ -429,6 +429,9 @@ pub(crate) async fn test_posting(client: reqwest::Client, origin: &str, allowed:
     struct Guard(bool);
     #[async_trait]
     impl MockDispatchGuard for Guard {
+        async fn check_reserved(&self, _: &str, _: &MockAccount) -> Result<()> {
+            if self.0 { Ok(()) } else { Err(Error::Denied) }
+        }
         async fn authorize_exact(&self, _: &str, _: &MockAccount) -> Result<()> {
             if self.0 { Ok(()) } else { Err(Error::Denied) }
         }
