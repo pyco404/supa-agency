@@ -250,3 +250,37 @@ async fn expiry_and_unauthorized_operations_never_send_requests() {
         .is_err()
     );
 }
+
+#[tokio::test]
+async fn hosted_credentials_never_replace_installed_owner_authority() {
+    let mut metadata = receipt();
+    metadata.client_id = super::super::oauth1::HOSTED_NAMESPACE.into();
+    metadata
+        .validate(metadata.receipt_id, now().unwrap())
+        .unwrap();
+    let auth = LiveAuthorization {
+        receipt: metadata,
+        digest: "not-installed".into(),
+    };
+    assert!(verify_connection(&auth).is_err());
+    struct NeverGuard;
+    #[async_trait]
+    impl MockDispatchGuard for NeverGuard {
+        async fn check_reserved(&self, _: &str, _: &MockAccount) -> Result<()> {
+            panic!("unapproved custody must not reach reservation");
+        }
+        async fn authorize_exact(&self, _: &str, _: &MockAccount) -> Result<()> {
+            panic!("unapproved POST");
+        }
+    }
+    assert!(
+        dispatch_reserved_once(
+            &auth,
+            "Synthetic public result.",
+            &text_sha256("Synthetic public result."),
+            &NeverGuard
+        )
+        .await
+        .is_err()
+    );
+}
