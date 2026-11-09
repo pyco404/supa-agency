@@ -386,6 +386,10 @@ pub async fn dispatch_reserved_once(
         }
         #[async_trait]
         impl MockDispatchGuard for Guard<'_> {
+            async fn check_reserved(&self, hash: &str, account: &MockAccount) -> Result<()> {
+                self.auth.check()?;
+                self.durable.check_reserved(hash, account).await
+            }
             async fn authorize_exact(&self, hash: &str, account: &MockAccount) -> Result<()> {
                 self.auth.check()?;
                 self.durable.authorize_exact(hash, account).await
