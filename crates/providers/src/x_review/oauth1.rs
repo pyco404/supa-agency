@@ -18,6 +18,106 @@ use supa_domain::{Error, Result};
 use zeroize::Zeroizing;
 
 pub const NAMESPACE: &str = "oauth1-supa-agency";
+/// Only an independently installed autonomous authorization can use this custody.
+pub const HOSTED_NAMESPACE: &str = "oauth1-supa-agency-hosted";
+const HOSTED_CREDENTIAL: &str = "/run/credentials/supa-x-autonomy.service/oauth1.json";
+fn service_credentials(path: &std::path::Path) -> Result<Credentials> {
+    use std::{io::Read, os::unix::fs::MetadataExt};
+    let uid = std::fs::metadata("/proc/self")
+        .map_err(|_| Error::KeyVault)?
+        .uid();
+    if uid == 0 {
+        return Err(Error::Denied);
+    }
+    for parent in path.ancestors().skip(1) {
+        let m = std::fs::symlink_metadata(parent).map_err(|_| Error::KeyVault)?;
+        if !m.is_dir()
+            || m.file_type().is_symlink()
+            || m.mode() & 0o022 != 0
+            || (m.uid() != 0 && m.uid() != uid)
+        {
+            return Err(Error::KeyVault);
+        }
+    }
+    let before = std::fs::symlink_metadata(path).map_err(|_| Error::KeyVault)?;
+    if !before.is_file()
+        || before.file_type().is_symlink()
+        || before.uid() != uid
+        || before.mode() & 0o077 != 0
+        || before.nlink() != 1
+        || before.len() > 16384
+    {
+        return Err(Error::KeyVault);
+    }
+    let file = std::fs::File::open(path).map_err(|_| Error::KeyVault)?;
+    let after = file.metadata().map_err(|_| Error::KeyVault)?;
+    if before.ino() != after.ino()
+        || before.dev() != after.dev()
+        || after.uid() != uid
+        || after.mode() & 0o077 != 0
+        || after.nlink() != 1
+        || after.len() > 16384
+    {
+        return Err(Error::KeyVault);
+    }
+    let mut raw = Zeroizing::new(Vec::new());
+    file.take(16385)
+        .read_to_end(&mut raw)
+        .map_err(|_| Error::KeyVault)?;
+    if raw.len() > 16384 {
+        return Err(Error::KeyVault);
+    }
+    let credentials: Credentials = serde_json::from_slice(&raw).map_err(|_| Error::KeyVault)?;
+    credentials.validate()?;
+    Ok(credentials)
+}
+fn hosted_credentials(auth: &super::live::LiveAuthorization) -> Result<Credentials> {
+    auth.check()?;
+    if auth.client_id() != HOSTED_NAMESPACE {
+        return Err(Error::Denied);
+    }
+    let credentials = service_credentials(std::path::Path::new(HOSTED_CREDENTIAL))?;
+    auth.check()?;
+    Ok(credentials)
+}
+pub(super) fn hosted_credentials_available(auth: &super::live::LiveAuthorization) -> Result<()> {
+    hosted_credentials(auth).map(|_| ())
+}
+pub(super) async fn dispatch_hosted(
+    auth: &super::live::LiveAuthorization,
+    text: &str,
+    hash: &str,
+    guard: &dyn MockDispatchGuard,
+) -> Result<XReceipt> {
+    let post = ReservedPost {
+        account: auth.account().clone(),
+        text,
+        text_sha256: hash,
+        expires_unix: auth.expires_unix().min(now()?.saturating_add(600)),
+        budget_microusd: 25000,
+    };
+    authorize_reservation(&post, guard).await?;
+    let credentials = hosted_credentials(auth)?;
+    let identity = IdentityClient::new()?;
+    let wire = PostingTransport {
+        client: identity.client,
+        credentials,
+        identity_url: identity.endpoint,
+        post_url: POST_ENDPOINT.into(),
+        session: None,
+        live_authorization: Some(auth),
+        expires: post.expires_unix,
+    };
+    Ok(MockXAdapter::prepared_live(
+        wire,
+        Zeroizing::new(String::new()),
+        post.account,
+        post.expires_unix,
+    )?
+    .execute_reserved_once(text, hash, now()?, guard)
+    .await)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Credentials {
@@ -592,5 +692,39 @@ mod tests {
                 .header("GET", IDENTITY_ENDPOINT, "other-nonce", 1234567890)
                 .unwrap()
         );
+    }
+}
+
+#[cfg(test)]
+mod hosted_tests {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    #[test]
+    fn hosted_custody_rejects_missing_unsafe_and_malformed_files() {
+        let dir = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = dir.path().join("oauth1.json");
+        assert!(service_credentials(&path).is_err());
+        let fixture = serde_json::json!({"X_API_KEY":"fixture-key","X_API_SECRET":"fixture-secret","X_ACCESS_TOKEN":"fixture-access","X_ACCESS_SECRET":"fixture-access-secret"});
+        std::fs::write(&path, fixture.to_string()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(service_credentials(&path).is_ok());
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(service_credentials(&path).is_err());
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(service_credentials(&path).is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = dir.path().join("link");
+        symlink(&path, &link).unwrap();
+        assert!(service_credentials(&link).is_err());
+        let hard = dir.path().join("hard");
+        std::fs::hard_link(&path, &hard).unwrap();
+        assert!(service_credentials(&path).is_err());
+        std::fs::remove_file(hard).unwrap();
+        for body in ["{}".to_owned(), "not-json".to_owned(), "x".repeat(16385)] {
+            std::fs::write(&path, body).unwrap();
+            assert!(service_credentials(&path).is_err());
+        }
     }
 }
