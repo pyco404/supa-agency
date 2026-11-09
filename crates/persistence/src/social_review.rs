@@ -222,7 +222,7 @@ impl Store {
     /// Fail closed outside a dedicated local ledger or the existing disposable test fixture.
     pub async fn verify_first_post_local_database(&self, testing: bool) -> Result<()> {
         let (name, version, addr): (String, String, Option<String>) = sqlx::query_as(
-            "SELECT current_database(),current_setting('server_version'),inet_server_addr()::text",
+            "SELECT current_database(),current_setting('server_version'),host(inet_server_addr())",
         )
         .fetch_one(self.pool())
         .await
