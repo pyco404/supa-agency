@@ -10,7 +10,7 @@ BINARY=ROOT/'target/work-review-validation/debug/supa-x-autonomy'
 UNIT=ROOT/'deployment/systemd/supa-x-autonomy.service'
 class HostedWorker(unittest.TestCase):
     def test_invalid_or_uninstalled_authority_fails_before_configuration(self):
-        for args in [[],['run'],['run','not-a-uuid'],['run','00000000-0000-0000-0000-000000000000'],['check','11111111-1111-4111-8111-111111111111'],['authorize','11111111-1111-4111-8111-111111111111'],['run','x','--enable']]:
+        for args in [[],['run'],['run','not-a-uuid'],['run','00000000-0000-0000-0000-000000000000'],['check','11111111-1111-4111-8111-111111111111'],['authorize','11111111-1111-4111-8111-111111111111'],['recover-paused','00000000-0000-0000-0000-000000000000'],['recover-paused','11111111-1111-4111-8111-111111111111'],['run','x','--enable']]:
             r=subprocess.run([str(BINARY),*args],env={'PATH':'/usr/bin:/bin'},capture_output=True,text=True,timeout=5)
             self.assertEqual(r.returncode,1)
             self.assertEqual(r.stdout,'')
