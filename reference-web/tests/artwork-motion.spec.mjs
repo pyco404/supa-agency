@@ -31,11 +31,13 @@ test.afterEach(async({page})=>page.unrouteAll({behavior:'wait'}));
 test('Factory artwork visibly moves and naturally loops in its unchanged frame',async({page},info)=>{
  await page.emulateMedia({reducedMotion:'no-preference'});const observed=await open(page);
  await expect.poll(()=>movie(page).evaluate(v=>v.currentTime)).toBeGreaterThan(.3);
- const state=await movie(page).evaluate(v=>{const rect=v.getBoundingClientRect(),p=v.closest('.section-art-media').getBoundingClientRect();window.artworkWraps=0;window.artworkLast=v.currentTime;v.addEventListener('timeupdate',()=>{if(v.currentTime<window.artworkLast)window.artworkWraps++;window.artworkLast=v.currentTime;});return {muted:v.muted,loop:v.loop,autoplay:v.autoplay,inline:v.playsInline,controls:v.controls,duration:v.duration,fit:getComputedStyle(v).objectFit,width:rect.width,height:rect.height,frameWidth:p.width,frameHeight:p.height};});
- expect(state).toMatchObject({muted:true,loop:true,autoplay:true,inline:true,controls:false,duration:4,fit:'cover'});
+ const state=await movie(page).evaluate(v=>{const rect=v.getBoundingClientRect(),p=v.closest('.section-art-media').getBoundingClientRect();window.artworkWraps=0;window.artworkLast=v.currentTime;v.addEventListener('timeupdate',()=>{if(v.currentTime<window.artworkLast)window.artworkWraps++;window.artworkLast=v.currentTime;});return {muted:v.muted,loop:v.loop,autoplay:v.autoplay,inline:v.playsInline,controls:v.controls,duration:v.duration,videoWidth:v.videoWidth,videoHeight:v.videoHeight,fit:getComputedStyle(v).objectFit,decoded:v.getVideoPlaybackQuality().totalVideoFrames,dropped:v.getVideoPlaybackQuality().droppedVideoFrames,width:rect.width,height:rect.height,frameWidth:p.width,frameHeight:p.height};});
+ expect(state).toMatchObject({muted:true,loop:true,autoplay:true,inline:true,controls:false,duration:4,videoWidth:960,videoHeight:600,fit:'cover'});
  expect(state.width).toBeCloseTo(state.frameWidth,0);expect(state.height).toBeCloseTo(state.frameHeight,0);expect(state.width/state.height).toBeCloseTo(16/9,1);
  const picture=artwork(page).locator('picture'),a=await picture.screenshot();await page.waitForTimeout(1200);const b=await picture.screenshot();
  const changed=await paintedChange(page,a,b);expect(changed).toBeGreaterThan(1);
+ const quality=await movie(page).evaluate(v=>{const q=v.getVideoPlaybackQuality();return {totalVideoFrames:q.totalVideoFrames,droppedVideoFrames:q.droppedVideoFrames};});expect(quality.totalVideoFrames-state.decoded).toBeGreaterThanOrEqual(15);expect((quality.droppedVideoFrames-state.dropped)/(quality.totalVideoFrames-state.decoded)).toBeLessThan(.2);
+ await expect(movie(page).locator('source').first()).toHaveAttribute('src','/public/assets/supa-factory-artwork-loop.webm');
  await expect.poll(()=>page.evaluate(()=>window.artworkWraps),{timeout:6000}).toBeGreaterThan(0);
  await expect(page.locator('.section-illustration[data-section=intelligence]')).toHaveCount(1);
  await expect(page.locator('.section-illustration[data-section=intelligence] video')).toHaveCount(0);
@@ -87,6 +89,10 @@ test('preference-change payload immediately releases the decoder before a fresh 
  await open(page);await expect(movie(page)).toHaveCount(1);
  await page.evaluate(()=>{for(const query of window.artworkQueries)query.dispatchEvent(new MediaQueryListEvent('change',{matches:true,media:query.media}));});
  await expect(movie(page)).toHaveCount(0);
+ // Visibility callbacks must not restart playback while a reduced-motion
+ // event is newer than the query snapshot (or an emulated query update).
+ await page.locator('.section-illustration[data-section=intelligence]').scrollIntoViewIfNeeded();
+ await artwork(page).scrollIntoViewIfNeeded();await expect(movie(page)).toHaveCount(0);
  await page.evaluate(()=>{for(const query of window.artworkQueries)query.dispatchEvent(new MediaQueryListEvent('change',{matches:false,media:query.media}));});
  await expect(movie(page)).toHaveCount(1);
 });
