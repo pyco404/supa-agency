@@ -8,14 +8,19 @@ import re
 import resource
 import signal
 import stat
+import subprocess
 import sys
 import time
 import uuid
 import warnings
+from pathlib import Path
 
 LABEL = 'supa-agency/x/supa_agency'
 CALLBACK = 'http://127.0.0.1:37641/oauth/x/callback'
 SCOPES = ['tweet.read', 'tweet.write', 'users.read']
+OAUTH1_NAMESPACE = 'oauth1-supa-agency'
+OAUTH1_FIELDS = ['X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', 'X_ACCESS_SECRET']
+LOCAL_OWNER = '6fd863e1-745d-4a06-b68e-eea69e854a69'
 
 
 def require(value):
@@ -32,6 +37,31 @@ def credential(value):
     require(isinstance(value, str) and 0 < len(value) <= 4096 and all(33 <= ord(c) <= 126 for c in value))
 
 
+def local_session():
+    """OS-authenticated active local desktop; no certificate, token or PAM secret."""
+    uid = os.getuid()
+    require(uid > 0 and Path(__file__).resolve().stat().st_uid == uid)
+    def properties(args):
+        result = subprocess.run(['/usr/bin/loginctl', *args, '--no-pager'], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=2,
+                                env={'LANG': 'C.UTF-8'}, check=True)
+        require(len(result.stdout) <= 2048)
+        lines = result.stdout.decode('ascii').splitlines()
+        require(all('=' in line for line in lines))
+        pairs = [line.split('=', 1) for line in lines]
+        require(len({p[0] for p in pairs}) == len(pairs))
+        return dict(pairs)
+    user = properties(['show-user', str(uid), '-p', 'Display', '-p', 'State'])
+    session = user.get('Display', '')
+    require(user.get('State') == 'active' and re.fullmatch(r'[A-Za-z0-9_]{1,64}', session))
+    data = properties(['show-session', session, '-p', 'User', '-p', 'Active', '-p', 'Remote',
+                       '-p', 'Class', '-p', 'State', '-p', 'LockedHint', '-p', 'Type'])
+    require(data.get('User') == str(uid) and data.get('Active') == 'yes' and data.get('Remote') == 'no'
+            and data.get('Class') == 'user' and data.get('State') == 'active'
+            and data.get('LockedHint') == 'no' and data.get('Type') in ['wayland', 'x11', 'tty'])
+    return {'uid': uid, 'session_id': session}
+
+
 class Keyring:
     def __init__(self):
         import gi
@@ -46,7 +76,7 @@ class Keyring:
 
     def attributes(self, client, owner, kind):
         identity(client, owner)
-        require(kind in ['configuration', 'connection'])
+        require(kind in ['configuration', 'connection', 'oauth1'])
         return dict(custody=LABEL, client_id=client, owner=owner, kind=kind, version='1')
 
     def items(self, client, owner, kind):
@@ -90,25 +120,56 @@ def configuration(body, client, owner):
     return body
 
 
-def enrollment(keyring, read=getpass.getpass):
+def enrollment(keyring, read=getpass.getpass, *, owner=None, client=None, authorize=None):
     with warnings.catch_warnings():
         warnings.simplefilter('error', getpass.GetPassWarning)
-        owner = read('Existing authorized owner UUID (hidden): ')
-        client = read('OAuth Client ID (hidden): ')
+        owner = owner if owner is not None else read('Existing authorized owner UUID (hidden): ')
+        client = client if client is not None else read('OAuth Client ID (hidden): ')
         secret = read('OAuth Client Secret (hidden): ')
         confirmation = read('Confirm Client Secret (hidden): ')
     identity(client, owner)
     credential(secret)
     require(secret == confirmation)
     body = configuration(dict(owner=owner, client_id=client, client_secret=secret, callback=CALLBACK), client, owner)
+    if authorize is not None:
+        authorize()
     keyring.put(client, owner, 'configuration', body)
     return {'stored': True, 'custody': LABEL, 'connected': False, 'publishing_enabled': False}
+
+
+def oauth1_bundle(body):
+    require(isinstance(body, dict) and set(body) == set(OAUTH1_FIELDS))
+    for value in body.values():
+        credential(value)
+        require(len(value) <= 1024)
+    return body
+
+
+def oauth1_enrollment(keyring, read=getpass.getpass, authorize=local_session):
+    authorize()
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', getpass.GetPassWarning)
+        body = oauth1_bundle({name: read(name + ' (hidden): ') for name in OAUTH1_FIELDS})
+    authorize()  # A locked/changed OS session cannot finish enrollment.
+    keyring.put(OAUTH1_NAMESPACE, LOCAL_OWNER, 'oauth1', body)
+    retained = oauth1_bundle(keyring.get(OAUTH1_NAMESPACE, LOCAL_OWNER, 'oauth1'))
+    import hmac
+    require(all(hmac.compare_digest(body[name], retained[name]) for name in OAUTH1_FIELDS))
+    return {'stored': True, 'storage_verified': True, 'credential_fields': OAUTH1_FIELDS,
+            'auth_mode': 'oauth1', 'account_verified': False, 'publishing_enabled': False, 'external_requests': 0}
 
 
 def ipc(operation, keyring, body):
     require(isinstance(body, dict))
     client, owner = body.get('client_id'), body.get('owner')
     identity(client, owner)
+    if operation == 'backend-read-oauth1':
+        require(set(body) == {'client_id', 'owner'} and owner == LOCAL_OWNER and client == OAUTH1_NAMESPACE)
+        local_session()
+        return oauth1_bundle(keyring.get(client, owner, 'oauth1'))
+    if operation == 'backend-local-session':
+        require(set(body) == {'client_id', 'owner'} and owner == LOCAL_OWNER)
+        return local_session()
     if operation == 'backend-read':
         require(set(body) == {'client_id', 'owner'})
         return configuration(keyring.get(client, owner, 'configuration'), client, owner)
@@ -149,8 +210,10 @@ def main():
     os.umask(0o077)
     signal.signal(signal.SIGALRM, timed_out)
     parser = PrivateParser(description=__doc__)
-    parser.add_argument('operation', choices=['setup', 'status', 'backend-read', 'backend-store-connection', 'backend-read-connection'])
+    parser.add_argument('operation', choices=['setup', 'setup-local', 'setup-oauth1', 'status-oauth1', 'status', 'backend-local-session', 'backend-read-oauth1', 'backend-read', 'backend-store-connection', 'backend-read-connection'])
+    parser.add_argument('public_client_id', nargs='?')
     args = parser.parse_args()
+    require((args.operation == 'setup-local') == (args.public_client_id is not None))
     # No libsecret operation before validating the private invocation channel.
     if args.operation.startswith('backend-'):
         require(stat.S_ISFIFO(os.fstat(0).st_mode) and stat.S_ISFIFO(os.fstat(1).st_mode))
@@ -159,6 +222,21 @@ def main():
         require(len(raw) <= 7000)
         body = json.loads(raw)
         result = ipc(args.operation, Keyring(), body)
+    elif args.operation == 'setup-oauth1':
+        require(all(os.isatty(fd) and os.fstat(fd).st_uid == os.getuid() for fd in [0, 1, 2]))
+        result = oauth1_enrollment(Keyring())
+    elif args.operation == 'status-oauth1':
+        signal.alarm(5)
+        keyring = Keyring()
+        entries = keyring.items(OAUTH1_NAMESPACE, LOCAL_OWNER, 'oauth1')
+        result = {'keyring_available_unlocked': True, 'configured': len(entries) == 1,
+                  'auth_mode': 'oauth1', 'credential_values_read': 0, 'account_verification': 'not_checked_offline',
+                  'publishing_enabled': False, 'external_requests': 0}
+    elif args.operation == 'setup-local':
+        require(all(os.isatty(fd) and os.fstat(fd).st_uid == os.getuid() for fd in [0, 1, 2]))
+        identity(args.public_client_id, LOCAL_OWNER)
+        local_session()
+        result = enrollment(Keyring(), owner=LOCAL_OWNER, client=args.public_client_id, authorize=local_session)
     elif args.operation == 'setup':
         require(sys.stdin.isatty() and sys.stderr.isatty())
         result = enrollment(Keyring())
