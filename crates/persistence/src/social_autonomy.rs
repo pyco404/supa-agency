@@ -1,4 +1,4 @@
-//! Mock-only bounded social authorization. Actor must come from server authentication.
+//! Bounded social authorization; live transport additionally requires external activation. Actor must come from server authentication.
 use crate::*;
 use serde::{Deserialize, Serialize};
 
@@ -46,14 +46,45 @@ impl Store {
         )
         .await
     }
-    /// No HTTP handler, public roster, secret loader or real posting mode is installed.
+    /// Mock entry point cannot be repurposed with a live policy.
+
     pub async fn autonomous_social_command_mock(
         &self,
         actor: Uuid,
         op: &str,
         body: Value,
     ) -> Result<Value> {
+        self.autonomous_social_command_mode(actor, op, body, "mock")
+            .await
+    }
+    /// Trusted backend only. No HTTP endpoint or browser-supplied actor is installed.
+    /// The runtime verifies root activation before dispatch; this method never loads tokens.
+    pub async fn autonomous_social_command_live(
+        &self,
+        actor: Uuid,
+        op: &str,
+        body: Value,
+    ) -> Result<Value> {
+        self.autonomous_social_command_mode(actor, op, body, "live")
+            .await
+    }
+    async fn autonomous_social_command_mode(
+        &self,
+        actor: Uuid,
+        op: &str,
+        body: Value,
+        mode: &str,
+    ) -> Result<Value> {
         if actor.is_nil() || self.operational_context().is_some() {
+            return Err(Error::Denied);
+        }
+        let configured: Option<String> =
+            sqlx::query_scalar("SELECT social_autonomy.policy_mode($1)")
+                .bind(actor)
+                .fetch_one(self.pool())
+                .await
+                .map_err(db)?;
+        if configured.as_deref() != Some(mode) {
             return Err(Error::Denied);
         }
         if op == "reserve" {
