@@ -1,6 +1,6 @@
 # Railway autonomous X worker readiness
 
-Read-only preparation, 2026-11-09 (Africa/Lagos). Runtime baseline:
+Initial assessment, 2026-11-09 (Africa/Lagos). The container implementation below supersedes the packaging-pending assessment. Runtime baseline:
 `dff7e2acf8a14931322562e2f74b5ca5a8333528`. No deployment, credential transfer,
 ledger export/restore, live X request or activation is authorized by this document.
 
@@ -19,8 +19,9 @@ uses one volume, at the cost of supervising two processes and accepting brief
 restart downtime. For this low-throughput, bounded trial it is the smaller change.
 It does not provide database high availability or independent disaster recovery.
 
-Railway runs long-lived containers, not the existing systemd unit. Three pieces
-remain to implement and test before any hosted rehearsal:
+Railway runs long-lived containers, not the existing systemd unit. The initial
+assessment identified the following three gaps. The implementation section below
+records their resolution and supersedes these original bootstrap proposals:
 
 1. A small image with the existing Rust binary, PostgreSQL 18 and a proper PID 1
    supervisor. Forward SIGTERM, stop the worker before PostgreSQL, reap children,
@@ -65,10 +66,12 @@ so no local `railway link` or service configuration was changed.
   ledger and restore/WAL working space before approving size).
 - Serverless/app sleep OFF; no cron, autoscaling, public domain or public TCP proxy.
   Do not rely on incidental database traffic to keep the scheduler awake.
-- PostgreSQL listens only on 127.0.0.1 inside this service; private SCRAM-authenticated
-  runtime login can execute only the reviewed functions. Separate PostgreSQL OS
-  user and non-root worker UID; the worker cannot read database storage or root
-  control files. Database administrative credentials never reach the worker.
+- PostgreSQL listens only on 127.0.0.1 inside this service; the private
+  SCRAM-authenticated runtime login can execute only the reviewed functions.
+  The original separate-OS-user proposal is superseded by the trusted single-UID
+  container described below. SQL restrictions do not isolate the ledger from an
+  OS-level compromise of this container. Root-owned activation receipts remain
+  protected, and no platform database credentials enter the worker.
 - Initial combined service ceiling: 512 MiB RAM, 0.25 vCPU; confirm under rehearsal
   load. Candidate PG tuning: 64 MiB shared buffers, 10 connections, 2 MiB work_mem.
   These are proposals, not measured capacity or applied settings.
@@ -194,3 +197,186 @@ No live readiness claim, service deployment, activation or paid X calls.
 - https://docs.railway.com/variables
 - https://docs.railway.com/deployments/deployment-teardown
 - https://docs.x.com/x-api/getting-started/pricing
+
+
+## Container implementation (local validation)
+
+`deployment/x-worker.Dockerfile` now builds the existing live binary plus a closed
+mock binary. The default final target is **mock**; `--target live` selects a
+separate image without mock initialization SQL or a mock executable. The mock
+image has no live posting executable. `x-worker.Dockerfile.dockerignore` admits
+only source/manifests/migrations and the explicit X-only scripts/SQL: no dotenv,
+private receipts, keys, history, artifacts or frontend assets.
+
+The image runs as UID/GID 10001, with tini forwarding signals to a Python
+supervisor. PostgreSQL and dispatch descendants inherit a lifetime kernel lock
+on the single volume. A private, fsynced `lease.json` retains holder UUID,
+monotonically increasing generation and heartbeat deadline across boots. **The
+deadline never authorizes stealing a held lock.** This is a single-volume lease,
+not a distributed lock across copied databases. Freeze the laptop writer and
+retain one authoritative database during the separately approved cutover.
+
+The implementation deliberately uses one OS UID for the X-only container's
+trusted processes (rather than the assessment's proposed two OS UIDs). SQL uses
+a different, restricted runtime login with no role membership or raw-table DML;
+no platform database or credentials enter this service. An OS-level compromise
+of this container can access its X-only data/custody; SQL restrictions are not a
+sandbox against the container operator. Do not run untrusted plugins, shell
+commands supplied by users, or platform workloads here.
+
+A volume at `/etc/supa-agent` must be explicitly prepared by its operator:
+root-owned mode 0755 at the mount root, with `x-worker` owned by 10001:10001,
+mode 0700. Live activation/control directories remain root-owned as required by
+the existing receipt verifier. The publisher never chowns the mount, runs as
+root, or requests `RAILWAY_RUN_UID=0`. The disposable Docker rehearsal performs a
+separate root-only initialization of its newly created test volume; that is not
+a root-running publisher or a change to a real volume. Railway volume ownership
+preparation remains an owner-only prerequisite before the hosted rehearsal.
+
+`deployment/x-worker.railway.toml` selects this Dockerfile, one replica,
+`/healthz`, bounded failure restarts, no sleep, no overlap and a 60-second drain.
+It requires the `/etc/supa-agent` volume mount before deployment can proceed.
+No public domain/TCP proxy is needed. Resource ceilings and volume creation still
+require separately approved Railway service setup; the config does not alter
+existing services or attach the platform database.
+
+### Startup and controls
+
+- `SUPA_X_WORKER_MODE` defaults to `paused`; the explicit runtime values are
+  `mock` for the mock image or `live` for the live image. A mismatched mode fails.
+  A fresh service starts paused. A previously owner-resumed exact, unexpired grant
+  can continue after safe recovery; changed, terminal or quarantined authority
+  stays paused. Restart never creates or renews a grant.
+- Mock initialization occurs only in a **new**, private directory and only in the
+  mock image. It installs the reviewed five X-only SQL dependencies and synthetic
+  records, a function-only login, and one paused mock grant. The expiry is retained
+  in the private manifest; restarts never renew it. Any supplied X credential or
+  DATABASE_URL causes mock startup/control to fail closed.
+- The live image never initializes, restores, migrates or grants anything. It
+  requires imported PG18 storage plus a private `ledger.json` with version 1,
+  mode `live`, `import_verified: true`, and the exact imported `grant_ids` list
+  (maximum 128). These are owner-recorded cutover assertions, not an independent
+  cryptographic restore proof. The cutover comparisons above remain mandatory.
+- Live `DATABASE_URL` must be the restricted `supa_x_post_runtime` login to
+  `127.0.0.1:55483/supa_x_first_post`, without query/fragment host overrides.
+  PostgreSQL retains imported SCRAM configuration and is forced to loopback.
+- Either mount a private, worker-owned credentials JSON file at the existing fixed
+  `/run/credentials/supa-x-autonomy.service/oauth1.json`, or provide all four
+  existing X variables as service-only sealed variables. The latter are written
+  once to that private ephemeral path; an existing mount is never overwritten.
+  A restart accepts an identical private file after constant-time comparison,
+  while mismatched values stop startup without replacing credentials.
+  The four values are removed from child environments and never logged. Keep
+  core dumps disabled. Never give live credentials to a source build or rehearsal.
+- `SUPA_X_ACTIVATION_RECEIPT` identifies the existing root-owned receipt. Credential
+  possession, health checks, and mode selection cannot authorize publishing.
+  Root receipt, exact account/owner/expiry/budget and durable grant checks remain.
+- On live boot, imported grants are recovered and paused using the new restricted
+  `recover-paused GRANT_UUID` command. This works after expiry but can only reduce
+  authority; it cannot load credentials, authorize, resume or dispatch. Terminal
+  grants remain terminal. Owner-authorized new grants are added to the private
+  restart inventory before enabling observation.
+- Owner controls are through authenticated Railway administrative shell access:
+  `python3 /opt/supa-x/entrypoint.py control read|authorize|resume|pause|stop|revoke`.
+  They are not web endpoints. Resume still needs exact root-installed live
+  authority. Restart continuation additionally requires the persisted active
+  marker to match the exact receipt ID and SHA-256; uncertain recovery never
+  resumes. An expired or changed receipt requires explicit fresh owner action.
+- `/healthz` is read-only and reports sanitized state, PG readiness, lease generation
+  and observation timestamp. It rejects stale/unready observations with HTTP 503;
+  no authorization receipt, draft/source text or credentials enter its output.
+- SIGTERM stops dispatch before stopping PostgreSQL. Failed child outcomes pause
+  observation; no automatic dispatch retry. Partial attempts recover uncertain.
+
+### Validation commands
+
+Run from the repository, without sourcing dotenv:
+
+```sh
+CARGO_TARGET_DIR=target/work-review-validation CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo build --locked -p supa-runtime --bin supa-x-autonomy --bin supa-x-mock-worker
+python3 scripts/test-x-worker-container.py
+python3 scripts/test-x-hosted-worker.py
+python3 scripts/validate-social-autonomy.py
+docker build --target mock -f deployment/x-worker.Dockerfile -t supa-x-worker:mock-local .
+python3 scripts/validate-x-worker-docker.py
+```
+
+The Docker rehearsal creates/removes only one new named test volume/container,
+uses `--network none`, dropped capabilities, no-new-privileges and a read-only
+root filesystem. It checks default pause, actual mock posting, duplicate-worker
+rejection, uncertainty, real container restart, history/audit integrity and clean
+SIGTERM. It never receives real credentials or the actual ledger. The full
+PostgreSQL suite separately checks caps, permission/identity boundaries, fault
+handling and restart recovery. The new process tests also exercise expiry,
+rolling caps and inherited-lock exclusion after parent loss.
+
+Local container testing uses a task-isolated rootless Docker daemon, not a
+system Docker installation or Railway service. Host AppArmor/cgroup delegation
+is unavailable in that environment; no production profile is changed. Local
+resource measurements cannot attest Railway cgroup ceilings. Hosted mock testing
+must verify those ceilings before live activation. Reports are private under
+`artifacts/x-worker-container/`; no GitHub Actions artifact storage is used.
+
+Status and final image/security results must be reported from the completed
+validation output. An incomplete build/scan/rehearsal is **not** a successful gate.
+Neither a live image build nor these instructions authorize image publication,
+Railway deployment, ledger migration or X activation.
+
+### Completed local validation — 2026-11-10
+
+Both complete Docker targets built successfully, using PostgreSQL 18.6
+(`18.6-1.pgdg12+2`) and non-root UID/GID 10001. Standard 16 MiB WAL segments
+are covered by the disposable PostgreSQL test; `min_wal_size=32MB` avoids an
+incompatible startup setting on a normally initialized imported ledger.
+
+| Local image | Configuration ID | Uncompressed bytes |
+| --- | --- | ---: |
+| Mock | `sha256:2fd82ca9db97eb366b5eea3f3b0c2056a27f040cef4e65792d4c38812947d098` | 483,772,052 |
+| Live | `sha256:220b28c5ae9ec4b982a855863ed1ad71ec4256183825077a35202ceb0d09dbd9` | 485,785,233 |
+
+These are local configuration IDs, **not published registry manifest digests**.
+
+- Nine process/storage/PG18 tests passed, plus three existing hosted-worker checks.
+- All six existing disposable PG18 journey, boundary and restart checks passed.
+- Eight actual Docker rehearsal checks passed with networking disabled. The
+  container booted paused, rejected a duplicate publisher, completed one mock
+  dispatch, continued an unchanged authorized grant across a clean restart without
+  reposting, preserved uncertainty/history across another restart, rejected resume
+  while quarantined, and exited cleanly on SIGTERM. Its temporary volume/container
+  were removed. No real credential or original posting ledger was used.
+- The live image separately failed closed without an imported ledger. Its binary
+  loads, and neither mock executable nor mock SQL fixtures are present.
+- Observed aggregate RSS was 118,332 KiB (about 116 MiB). This snapshot includes
+  shared pages counted in multiple processes; it is not a peak/load guarantee.
+  The proposed 512 MiB/0.25 vCPU Railway ceiling remains untested and unapplied.
+- Rust formatting, Python compilation and TOML contract checks passed. Deployment
+  fields were reviewed against Railway's official schema; automated schema
+  download from this workstation returned HTTP 403, so a complete automated
+  remote-schema validation is not claimed.
+
+**Security gate: NO-GO for hosted deployment.** Trivy 0.76.1 scanned both complete
+images using its freshly downloaded database, without an ignore file or severity
+filter. Each image reports 4 CRITICAL, 87 HIGH, 245 MEDIUM, 192 LOW and 2 UNKNOWN
+findings, and zero embedded-secret findings. These are scanner classifications,
+not proof that every finding is exploitable through this worker. None is
+suppressed or accepted by this preparation.
+
+Of the 91 CRITICAL/HIGH records, 65 are Debian package records and 26 are from the
+inherited `/usr/local/bin/gosu` Go runtime. The worker does not use gosu, but the
+file remains in this scanned image. Critical records include `CVE-2025-68121`
+(gosu's Go runtime), `CVE-2025-7458` (SQLite), `CVE-2026-6653` (libxml2), and
+`CVE-2023-45853` (zlib). The Debian records contain no fixed package version in
+this scanner report; that is not permission to ignore them. A separate explicit
+Cargo.lock scan identified 274 packages and zero reported vulnerabilities.
+
+Private local evidence is under `artifacts/x-worker-container/`: image identities,
+complete scans, security summary, rehearsal/cleanup results, offline live smoke
+checks and existing PG18 test references. Repository secret checks passed; staged
+new files are scanned again by mandatory commit hooks.
+
+Before a hosted rehearsal, remediate/review the runtime base and unused inherited
+helper, then rebuild and rerun the same container/security checks. Do not publish
+these images or bypass the findings to proceed. Only after that gate clears is
+one separately authorized private, credential-free mock Railway service/volume
+rehearsal appropriate. No service setup, credential transfer, ledger migration,
+account lookup, paid inference or X posting occurred during this validation.
