@@ -99,6 +99,25 @@ class Configuration(unittest.TestCase):
         with patch.dict(os.environ, {'X_API_KEY':'export-override'}):
             self.assertEqual(m.oauth1_credentials(self.root)['X_API_KEY'],'synthetic-fixture-only')
 
+    def test_first_post_launcher_keeps_credentials_private_and_requires_exact_options(self):
+        binary=self.root/'target/work-review-validation/debug/supa-x-first-post'
+        binary.parent.mkdir(parents=True);binary.write_text('synthetic executable fixture')
+        values=dict(self.values,**{key:'synthetic-x-fixture-only' for key in m.OAUTH1_FIELDS})
+        class Launched(Exception): pass
+        for action in ['x-first-post-prepare','x-first-post']:
+            argv=['local-config.py',action]
+            if action=='x-first-post':argv+=['--authorization-id','00000000-0000-4000-8000-000000000001','--expires-at','2000000000']
+            with patch.object(m,'ROOT',self.root),patch.object(m,'load',return_value=values),patch.object(m.sys,'argv',argv),patch.object(m.os,'isatty',return_value=True),patch.object(m.os,'chdir'),patch.object(m.os,'execve',side_effect=Launched) as launch:
+                with self.assertRaises(Launched):m.main()
+                _,args,env=launch.call_args.args
+                for key in m.OAUTH1_FIELDS:self.assertNotIn(key,env)
+                if action=='x-first-post':
+                    self.assertEqual(args[-1],'--authorize-one-get-and-one-post-budget-025')
+                    self.assertIn('DATABASE_URL',env)
+                else:self.assertEqual(args[-1],'prepare');self.assertNotIn('DATABASE_URL',env)
+        with patch.object(m,'ROOT',self.root),patch.object(m,'load',return_value=values),patch.object(m.sys,'argv',['local-config.py','x-first-post']),patch.object(m.os,'isatty',return_value=True):
+            with self.assertRaises(m.Invalid):m.main()
+
     def test_boundaries_disabled_capabilities_and_malformed(self):
         for key in m.DISABLED:
             for bad in ['true', '1', 'FALSE', '']:
