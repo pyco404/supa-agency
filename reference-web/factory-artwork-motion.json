@@ -1,0 +1,25 @@
+{
+  "source": "reference-web/public/assets/supa-factory-960.webp",
+  "source_sha256": "4fd745d0082f6b5a98112e24f25d8619a1becca3135ae0d14764bcc888893c90",
+  "approved_navigation_filter": "scale=480:480:flags=lanczos,crop=480:300:0:83,format=gbrp,geq=r='r(clip(X+(3*sin(2*PI*T/4)*exp(-pow((X-178)/35,2)-pow((Y-19)/64,2))-5*sin(2*PI*T/4+0.6)*exp(-pow((X-375)/65,2)-pow((Y-110)/35,2))+1.5*sin(2*PI*T/4)*exp(-pow((X-235)/50,2)-pow((Y-169)/60,2))),0,W-1),clip(Y+(9*(1-cos(2*PI*T/4))*exp(-pow((X-238)/55,2)-pow((Y-91)/28,2))+5*(1-cos(2*PI*T/4))*exp(-pow((X-178)/35,2)-pow((Y-19)/64,2))-4*sin(2*PI*T/4+0.6)*exp(-pow((X-375)/65,2)-pow((Y-110)/35,2))),0,H-1))*(1)':g='g(clip(X+(3*sin(2*PI*T/4)*exp(-pow((X-178)/35,2)-pow((Y-19)/64,2))-5*sin(2*PI*T/4+0.6)*exp(-pow((X-375)/65,2)-pow((Y-110)/35,2))+1.5*sin(2*PI*T/4)*exp(-pow((X-235)/50,2)-pow((Y-169)/60,2))),0,W-1),clip(Y+(9*(1-cos(2*PI*T/4))*exp(-pow((X-238)/55,2)-pow((Y-91)/28,2))+5*(1-cos(2*PI*T/4))*exp(-pow((X-178)/35,2)-pow((Y-19)/64,2))-4*sin(2*PI*T/4+0.6)*exp(-pow((X-375)/65,2)-pow((Y-110)/35,2))),0,H-1))*(1)':b='b(clip(X+(3*sin(2*PI*T/4)*exp(-pow((X-178)/35,2)-pow((Y-19)/64,2))-5*sin(2*PI*T/4+0.6)*exp(-pow((X-375)/65,2)-pow((Y-110)/35,2))+1.5*sin(2*PI*T/4)*exp(-pow((X-235)/50,2)-pow((Y-169)/60,2))),0,W-1),clip(Y+(9*(1-cos(2*PI*T/4))*exp(-pow((X-238)/55,2)-pow((Y-91)/28,2))+5*(1-cos(2*PI*T/4))*exp(-pow((X-178)/35,2)-pow((Y-19)/64,2))-4*sin(2*PI*T/4+0.6)*exp(-pow((X-375)/65,2)-pow((Y-110)/35,2))),0,H-1))*(1)'",
+  "filter": "scale=960:960:flags=lanczos,crop=960:600:0:166,format=gbrp,geq=r='r(2*(clip((X/2)+(3*sin(2*PI*T/4)*exp(-pow(((X/2)-178)/35,2)-pow(((Y/2)-19)/64,2))-5*sin(2*PI*T/4+0.6)*exp(-pow(((X/2)-375)/65,2)-pow(((Y/2)-110)/35,2))+1.5*sin(2*PI*T/4)*exp(-pow(((X/2)-235)/50,2)-pow(((Y/2)-169)/60,2))),0,(W/2)-1)),2*(clip((Y/2)+(9*(1-cos(2*PI*T/4))*exp(-pow(((X/2)-238)/55,2)-pow(((Y/2)-91)/28,2))+5*(1-cos(2*PI*T/4))*exp(-pow(((X/2)-178)/35,2)-pow(((Y/2)-19)/64,2))-4*sin(2*PI*T/4+0.6)*exp(-pow(((X/2)-375)/65,2)-pow(((Y/2)-110)/35,2))),0,(H/2)-1)))*(1)':g='g(2*(clip((X/2)+(3*sin(2*PI*T/4)*exp(-pow(((X/2)-178)/35,2)-pow(((Y/2)-19)/64,2))-5*sin(2*PI*T/4+0.6)*exp(-pow(((X/2)-375)/65,2)-pow(((Y/2)-110)/35,2))+1.5*sin(2*PI*T/4)*exp(-pow(((X/2)-235)/50,2)-pow(((Y/2)-169)/60,2))),0,(W/2)-1)),2*(clip((Y/2)+(9*(1-cos(2*PI*T/4))*exp(-pow(((X/2)-238)/55,2)-pow(((Y/2)-91)/28,2))+5*(1-cos(2*PI*T/4))*exp(-pow(((X/2)-178)/35,2)-pow(((Y/2)-19)/64,2))-4*sin(2*PI*T/4+0.6)*exp(-pow(((X/2)-375)/65,2)-pow(((Y/2)-110)/35,2))),0,(H/2)-1)))*(1)':b='b(2*(clip((X/2)+(3*sin(2*PI*T/4)*exp(-pow(((X/2)-178)/35,2)-pow(((Y/2)-19)/64,2))-5*sin(2*PI*T/4+0.6)*exp(-pow(((X/2)-375)/65,2)-pow(((Y/2)-110)/35,2))+1.5*sin(2*PI*T/4)*exp(-pow(((X/2)-235)/50,2)-pow(((Y/2)-169)/60,2))),0,(W/2)-1)),2*(clip((Y/2)+(9*(1-cos(2*PI*T/4))*exp(-pow(((X/2)-238)/55,2)-pow(((Y/2)-91)/28,2))+5*(1-cos(2*PI*T/4))*exp(-pow(((X/2)-178)/35,2)-pow(((Y/2)-19)/64,2))-4*sin(2*PI*T/4+0.6)*exp(-pow(((X/2)-375)/65,2)-pow(((Y/2)-110)/35,2))),0,(H/2)-1)))*(1)'",
+  "width": 960,
+  "height": 600,
+  "fps": 20,
+  "seconds": 4,
+  "method": "Original source pixels with the approved displacement field scaled to twice its coordinate resolution; unchanged camera, crop and periodic motion",
+  "assets": [
+    {
+      "path": "/public/assets/supa-factory-artwork-loop.webm",
+      "sha256": "c2eef6a4df1a6e31646bee5af2bfd584b81681a45eb7384c3c1dd3fca067591b",
+      "bytes": 154150,
+      "codec": "vp9"
+    },
+    {
+      "path": "/public/assets/supa-factory-artwork-loop.mp4",
+      "sha256": "7fc4045916bb70869a00399e3512384ef474feff6c8383288dd713a1591b9c08",
+      "bytes": 430538,
+      "codec": "h264"
+    }
+  ]
+}
