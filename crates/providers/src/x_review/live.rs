@@ -192,6 +192,9 @@ impl LiveAuthorization {
     pub fn account(&self) -> &MockAccount {
         &self.receipt.account
     }
+    pub fn is_hosted_oauth1(&self) -> bool {
+        self.receipt.client_id == super::oauth1::HOSTED_NAMESPACE
+    }
     pub fn expires_unix(&self) -> u64 {
         self.receipt.expires_unix
     }
@@ -351,6 +354,10 @@ impl MockXTransport for AuthorizedTransport<'_> {
 /// Does not perform a paid identity read or refresh.
 pub fn verify_connection(auth: &LiveAuthorization) -> Result<u64> {
     auth.check()?;
+    if auth.client_id() == super::oauth1::HOSTED_NAMESPACE {
+        super::oauth1::hosted_credentials_available(auth)?;
+        return Ok(auth.expires_unix());
+    }
     if auth.client_id() == super::oauth1::NAMESPACE {
         let session =
             crate::x_oauth::local::authorization::AuthorizationReceipt::local_owner_session(
@@ -374,6 +381,9 @@ pub async fn dispatch_reserved_once(
     guard: &dyn MockDispatchGuard,
 ) -> Result<XReceipt> {
     auth.check()?;
+    if auth.client_id() == super::oauth1::HOSTED_NAMESPACE {
+        return super::oauth1::dispatch_hosted(auth, text, hash, guard).await;
+    }
     if auth.client_id() == super::oauth1::NAMESPACE {
         let session =
             crate::x_oauth::local::authorization::AuthorizationReceipt::local_owner_session(
