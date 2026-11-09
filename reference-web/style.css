@@ -274,3 +274,9 @@ body[data-view=projects] .stage{--workspace-gutter:clamp(16px,2vw,32px);--worksp
 .wheel-motion{opacity:0;transition:opacity .2s ease-out}
 .wheel-media[data-playing=true] .wheel-motion{opacity:1}
 @media(prefers-reduced-motion:reduce){.wheel-motion{display:none}}
+
+/* Keep the original responsive picture and accessible still beneath page loops. */
+.section-art-media{position:relative}
+.section-motion-media.wheel-media{position:absolute;inset:0;width:100%;height:100%;margin:0;background:transparent}
+.section-motion-media .wheel-thumb{display:none}
+.section-motion-media .wheel-motion{object-position:50% 46%}
