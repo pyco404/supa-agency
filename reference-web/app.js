@@ -3,7 +3,7 @@
 // Persistent agents. Application-enforced permissions.
 import { createWheel, createCardMedia } from './wheel.js';
 import { createScenes } from './scene.js';
-import { navigation as privateNavigation, publicNavigation, publicSectionView, sectionArtwork, navigationMotion, githubNotice, overview, sectionView, read, units } from './platform.js';
+import { navigation as privateNavigation, publicNavigation, publicSectionView, sectionArtwork, githubNotice, overview, sectionView, read, units } from './platform.js';
 
 const $ = selector => document.querySelector(selector);
 const root = document.documentElement;
@@ -18,8 +18,9 @@ function repeatSection(id){
 }
 // Only source-matched, approved loops belong in page artwork. Intelligence's
 // Purpose Qualification illustration has no matching loop and remains static.
-const pageArtworkMotion=Object.freeze({factory:navigationMotion.factory});
+const pageArtworkMotion=Object.freeze({factory:Object.freeze({webm:'/public/assets/supa-factory-artwork-loop.webm',mp4:'/public/assets/supa-factory-artwork-loop.mp4'})});
 const artworkMedia=new Set();
+let artworkReduced=true; // Remain paused until the preference has been read.
 function clearArtworkMedia(){for(const item of artworkMedia)item.destroy();artworkMedia.clear();}
 function syncArtworkMedia(){for(const item of artworkMedia)item.sync();}
 function animateArtwork(picture,id,poster){
@@ -27,12 +28,13 @@ function animateArtwork(picture,id,poster){
   const media=createCardMedia({thumb:poster,media:pageArtworkMotion[id]});
   media.element.classList.add('section-motion-media');picture.append(media.element);
   let visible=false;
-  const item={sync(motionReduced=reduced.matches){media.setActive(visible&&picture.isConnected&&!motionReduced&&!document.hidden&&document.body.dataset.view==='projects'&&!$('.pane').inert);},destroy(){observer.disconnect();media.destroy();}};
+  const item={sync(){media.setActive(visible&&picture.isConnected&&!artworkReduced&&!document.hidden&&document.body.dataset.view==='projects'&&!$('.pane').inert);},destroy(){observer.disconnect();media.destroy();}};
   const observer=new IntersectionObserver(entries=>{visible=entries.some(entry=>entry.isIntersecting);item.sync();},{threshold:0});
   artworkMedia.add(item);observer.observe(picture);
 }
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-reduced.addEventListener('change', event => { root.dataset.motion=event.matches?'still':'running';for(const item of artworkMedia)item.sync(event.matches);if(event.matches)revealTyping?.(); });
+artworkReduced=reduced.matches;
+reduced.addEventListener('change', event => { root.dataset.motion=event.matches?'still':'running';artworkReduced=event.matches;syncArtworkMedia();if(event.matches)revealTyping?.(); });
 root.dataset.motion = reduced.matches?'still':'running';
 document.addEventListener('visibilitychange',syncArtworkMedia);
 const node = (tag,className,text) => { const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=String(text);return el; };
