@@ -90,6 +90,27 @@ class Contracts(unittest.TestCase):
             m.ipc('backend-store-connection', store, body)
         self.assertEqual(len(store.rows), 2)
 
+    def test_private_connection_read_is_exact_scoped_expiring_and_nonmutating(self):
+        store = self.setup_store()
+        body = dict(owner=OWNER, client_id=CLIENT, account_id='123', username='supa_agency',
+                    scope=m.SCOPES, expires_unix=int(time.time())+600, access_token='fixture-access-token-only')
+        m.ipc('backend-store-connection', store, body)
+        query = dict(owner=OWNER, client_id=CLIENT, account_id='123')
+        self.assertEqual(m.ipc('backend-read-connection', store, query), body)
+        for change in [dict(account_id='124'), dict(owner='00000000-0000-0000-0000-000000000002'),
+                       dict(client_id='other'), dict(extra=True)]:
+            with self.assertRaises(ValueError):
+                m.ipc('backend-read-connection', store, {**query, **change})
+        for key, bad in [('expires_unix', 1), ('username', 'other'), ('scope', ['tweet.write']),
+                         ('owner', '00000000-0000-0000-0000-000000000002')]:
+            stored = store.rows[CLIENT, OWNER, 'connection']
+            original = stored[key]
+            stored[key] = bad
+            with self.assertRaises(ValueError):
+                m.ipc('backend-read-connection', store, query)
+            stored[key] = original
+        self.assertEqual(len(store.rows), 2)
+
 
 def isolated_service():
     assert os.environ.get('SUPA_X_KEYRING_ISOLATED_TEST') == '1'
