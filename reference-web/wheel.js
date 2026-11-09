@@ -1,6 +1,6 @@
 /** Independently authored project wheel; no reference website source is vendored. */
-// One decorative decoder at a time. No source is attached until a visible,
-// selected card is allowed to move; the poster remains underneath throughout.
+// One decorative decoder per media layer. No source is attached until a visible,
+// selected card or page illustration is allowed to move; the poster remains underneath throughout.
 export function createCardMedia(entry) {
   const element = document.createElement("span");
   element.className = "wheel-media";
@@ -16,10 +16,10 @@ export function createCardMedia(entry) {
   image.height = 200;
   image.referrerPolicy = "no-referrer";
   element.append(image);
-  // Only reviewed, same-origin public navigation assets belong in this layer.
+  // Only reviewed, same-origin public motion assets belong in this layer.
   const sources = ["webm", "mp4"].flatMap(format => {
     const path = entry.media?.[format];
-    return typeof path === "string" && /^\/public\/assets\/supa-(economy|social|trading|factory)-loop\.(webm|mp4)$/.test(path)
+    return typeof path === "string" && /^\/public\/assets\/supa-((economy|social|trading|factory)-loop|factory-artwork-loop)\.(webm|mp4)$/.test(path)
       && path.endsWith("." + format) ? [{ path, type: "video/" + format }] : [];
   });
   let video = null, startupTimer = null, failed = false, disposed = false;
