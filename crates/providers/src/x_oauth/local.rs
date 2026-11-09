@@ -114,6 +114,26 @@ impl PrivateKeyring {
         }
         result
     }
+    /// Private server IPC only; approval is rechecked before reading any token.
+    pub(crate) fn posting_connection(
+        &self,
+        auth: &crate::x_review::live::LiveAuthorization,
+    ) -> Result<crate::x_review::live::Connection> {
+        auth.check()?;
+        if self.owner != auth.owner() {
+            return Err(Error::Denied);
+        }
+        let raw = self.call(
+            "backend-read-connection",
+            &serde_json::json!({
+                "owner":self.owner,"client_id":auth.client_id(),"account_id":auth.account().id
+            }),
+        )?;
+        let connection: crate::x_review::live::Connection =
+            serde_json::from_slice(&raw).map_err(|_| Error::KeyVault)?;
+        connection.validate(auth)?;
+        Ok(connection)
+    }
     fn retain(
         &self,
         client_id: &str,
