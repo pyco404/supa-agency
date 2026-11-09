@@ -13,6 +13,24 @@ from urllib.parse import parse_qs, unquote, quote
 
 mode, certificate, key, stats = sys.argv[1:]
 count = 0
+nonces = set()
+
+def verify_oauth1(header, method, path, port):
+    assert header.startswith("OAuth ")
+    fields = dict((unquote(k), unquote(v.strip('"'))) for k,v in (p.split("=",1) for p in header[6:].split(", ")))
+    signature = fields.pop("oauth_signature")
+    assert fields["oauth_consumer_key"] == "fixture-consumer-key"
+    assert fields["oauth_token"] == "fixture-access-token"
+    assert fields["oauth_signature_method"] == "HMAC-SHA1" and fields["oauth_version"] == "1.0"
+    assert len(fields["oauth_nonce"]) == 32 and fields["oauth_nonce"] not in nonces
+    nonces.add(fields["oauth_nonce"])
+    assert abs(int(fields["oauth_timestamp"]) - int(time.time())) < 60
+    encode = lambda value: quote(value, safe="~-._")
+    normalized = "&".join(encode(k)+"="+encode(v) for k,v in sorted(fields.items()))
+    endpoint = "https://127.0.0.1:"+str(port)+path
+    base = method+"&"+encode(endpoint)+"&"+encode(normalized)
+    expected = base64.b64encode(hmac.new(b"fixture-consumer-secret&fixture-access-secret", base.encode(), hashlib.sha1).digest()).decode()
+    assert hmac.compare_digest(signature, expected)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -54,27 +72,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 time.sleep(6)
         elif self.command == 'GET' and self.path == '/2/users/me':
             if mode.startswith('oauth1_'):
-                auth = self.headers['Authorization']
-                assert auth.startswith('OAuth ')
-                fields = dict((unquote(k), unquote(v.strip('"'))) for k,v in (p.split('=',1) for p in auth[6:].split(', ')))
-                signature = fields.pop('oauth_signature')
-                assert fields['oauth_consumer_key'] == 'fixture-consumer-key'
-                assert fields['oauth_token'] == 'fixture-access-token'
-                assert fields['oauth_signature_method'] == 'HMAC-SHA1' and fields['oauth_version'] == '1.0'
-                encode = lambda value: quote(value, safe='~-._')
-                normalized = '&'.join(encode(k)+'='+encode(v) for k,v in sorted(fields.items()))
-                endpoint = 'https://127.0.0.1:'+str(self.server.server_port)+'/2/users/me'
-                base = 'GET&'+encode(endpoint)+'&'+encode(normalized)
-                expected = base64.b64encode(hmac.new(b'fixture-consumer-secret&fixture-access-secret', base.encode(), hashlib.sha1).digest()).decode()
-                assert hmac.compare_digest(signature, expected)
-                assert self.command == 'GET'
+                verify_oauth1(self.headers['Authorization'], 'GET', self.path, self.server.server_port)
                 status = {'oauth1_expired':401, 'oauth1_rate':429, 'oauth1_credits':402, 'oauth1_redirect':302}.get(mode,200)
                 if mode == 'oauth1_redirect': headers['Location'] = 'https://example.invalid/never-follow'
             else:
                 assert self.headers['Authorization'] == 'Bearer fixture-access-token-only'
-            result = {'data': {'id': '0' if mode == 'oauth1_bad_id' else '123', 'username': 'other' if mode in ['account', 'posting_account', 'oauth1_account'] else 'supa_agency'}}
+            result = {'data': {'id': '0' if mode == 'oauth1_bad_id' else '123', 'username': 'other' if mode in ['account', 'posting_account', 'oauth1_account', 'oauth1_post_account'] else 'supa_agency'}}
             if mode in ['partial', 'oauth1_partial']:
                 result['errors'] = [{'message': 'synthetic partial error'}]
+        elif self.command == 'POST' and self.path == '/2/tweets' and mode.startswith('oauth1_post_'):
+            verify_oauth1(self.headers['Authorization'], 'POST', self.path, self.server.server_port)
+            assert self.headers['Content-Type'] == 'application/json'
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            assert set(body) == {'text'}
+            assert body['text'] == "Supa Agent reporting for onboarding. Our official X account is connected and its identity verified. Autonomous posting is still off. Apparently even AI needs a permission slip."
+            status = {'oauth1_post_permission':403, 'oauth1_post_expired':401, 'oauth1_post_rate':429,
+                      'oauth1_post_credits':402, 'oauth1_post_server':503, 'oauth1_post_redirect':302}.get(mode,201)
+            headers['x-rate-limit-reset'] = '123456'
+            if mode == 'oauth1_post_redirect':headers['Location'] = 'https://example.invalid/never-follow'
+            if mode == 'oauth1_post_disconnect':
+                self.close_connection = True
+                return
+            if mode == 'oauth1_post_slow':time.sleep(5)
+            result = {'data':{'id':'0' if mode=='oauth1_post_bad_id' else '456', 'text':body['text']}}
         elif self.command == 'POST' and self.path == '/2/tweets' and mode.startswith('posting_'):
             assert self.headers['Authorization'] == 'Bearer fixture-access-token-only'
             body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
@@ -91,13 +111,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             status, result = 400, {}
         raw = json.dumps(result).encode()
-        if self.command == 'POST' and mode == 'oversize':
+        if self.command == 'POST' and mode in ['oversize', 'oauth1_post_oversize']:
             raw = b'x'*16385
-        if self.command == 'POST' and mode == 'malformed':
+        if self.command == 'POST' and mode in ['malformed', 'oauth1_post_malformed']:
             raw = b'{'
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
-        if mode != 'oversize':
+        if mode != 'oversize' and not (self.command == 'POST' and mode == 'oauth1_post_oversize'):
             self.send_header('Content-Length', str(len(raw)))
         for name, value in headers.items():
             self.send_header(name, value)
