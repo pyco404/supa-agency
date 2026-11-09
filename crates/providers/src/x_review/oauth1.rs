@@ -195,7 +195,7 @@ pub async fn verify_official_account(
         return Err(Error::Denied);
     }
     authorization.check()?;
-    let bytes = PrivateKeyring::new(owner)?.read_oauth1()?;
+    let bytes = PrivateKeyring::new(owner)?.read_oauth1_env()?;
     let credentials: Credentials = serde_json::from_slice(&bytes).map_err(|_| Error::KeyVault)?;
     credentials.validate()?;
     let client = IdentityClient::new()?;
