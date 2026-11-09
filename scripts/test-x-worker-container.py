@@ -196,6 +196,7 @@ class PostgresJourney(unittest.TestCase):
                 worker.acquire()
                 worker.prepare()
                 worker.observe()
+                self.assertEqual(self.sql(worker, 'SHOW wal_segment_size'), '16MB')
                 self.assertEqual(worker.health['state'], 'paused')
                 self.assertEqual(self.sql(worker, 'SELECT count(*) FROM social_autonomy.attempts'), '0')
                 worker.control_operation('resume')
