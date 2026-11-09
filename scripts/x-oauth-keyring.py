@@ -112,15 +112,23 @@ def ipc(operation, keyring, body):
     if operation == 'backend-read':
         require(set(body) == {'client_id', 'owner'})
         return configuration(keyring.get(client, owner, 'configuration'), client, owner)
-    if operation == 'backend-store-connection':
+    if operation in ['backend-store-connection', 'backend-read-connection']:
+        reading = operation == 'backend-read-connection'
+        if reading:
+            require(set(body) == {'client_id', 'owner', 'account_id'})
+            requested_account = body['account_id']
+            body = keyring.get(client, owner, 'connection')
+            require(body.get('account_id') == requested_account)
         require(set(body) == {'client_id', 'owner', 'account_id', 'username', 'scope', 'expires_unix', 'access_token'})
+        require(body['client_id'] == client and body['owner'] == owner)
         require(body['username'] == 'supa_agency' and isinstance(body['account_id'], str))
         require(re.fullmatch(r'[1-9][0-9]{0,19}', body['account_id']) and int(body['account_id']) <= 2**64 - 1)
         require(body['scope'] == SCOPES and type(body['expires_unix']) is int and int(time.time()) < body['expires_unix'] <= int(time.time()) + 7200)
         credential(body['access_token'])
         require(not body['access_token'].startswith('synthetic-'))
-        keyring.items(client, owner, 'configuration')
         require(len(keyring.items(client, owner, 'configuration')) == 1)
+        if reading:
+            return body  # Private backend FIFO only. Never a status/CLI/browser response.
         keyring.put(client, owner, 'connection', body)
         return {'stored': True}
     require(False)
@@ -141,7 +149,7 @@ def main():
     os.umask(0o077)
     signal.signal(signal.SIGALRM, timed_out)
     parser = PrivateParser(description=__doc__)
-    parser.add_argument('operation', choices=['setup', 'status', 'backend-read', 'backend-store-connection'])
+    parser.add_argument('operation', choices=['setup', 'status', 'backend-read', 'backend-store-connection', 'backend-read-connection'])
     args = parser.parse_args()
     # No libsecret operation before validating the private invocation channel.
     if args.operation.startswith('backend-'):
