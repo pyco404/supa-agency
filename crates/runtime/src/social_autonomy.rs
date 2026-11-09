@@ -366,6 +366,17 @@ pub async fn run_live_scheduler(
             return Ok(poll);
         }
         let state = verify_live_grant(store, auth.owner(), grant, auth).await?;
+        if state["grant"]["state"] == "paused" {
+            // Keep the supervised service available for an explicit owner resume;
+            // a paused observation performs no custody read or X request.
+            if poll + 1 < max_polls {
+                tokio::select! {
+                    _=cancel.changed()=>{},
+                    _=tokio::time::sleep(std::time::Duration::from_secs(60))=>{}
+                }
+            }
+            continue;
+        }
         if state["grant"]["state"] != "active" {
             return Ok(poll);
         }
