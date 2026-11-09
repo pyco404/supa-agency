@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 import subprocess
 import sys
 import tempfile
@@ -111,6 +112,68 @@ class Contracts(unittest.TestCase):
             stored[key] = original
         self.assertEqual(len(store.rows), 2)
 
+    def test_local_session_uses_logind_uid_and_rejects_locked_remote_or_inactive(self):
+        uid = os.getuid()
+        user = b'Display=fixture_session\nState=active\n'
+        fields = dict(User=str(uid), Active='yes', Remote='no', Class='user', State='active', LockedHint='no', Type='wayland')
+        def result(data):
+            return type('Reply', (), {'stdout': data})()
+        def check(data):
+            raw = ''.join(k+'='+v+'\n' for k,v in data.items()).encode()
+            return patch.object(m.subprocess, 'run', side_effect=[result(user), result(raw)])
+        with check(fields):
+            self.assertEqual(m.local_session(), {'uid': uid, 'session_id': 'fixture_session'})
+        for key, value in [('User', str(uid+1)), ('Active', 'no'), ('Remote', 'yes'), ('Class', 'greeter'),
+                           ('State', 'closing'), ('LockedHint', 'yes'), ('Type', 'unspecified')]:
+            with check({**fields, key: value}), self.assertRaises(ValueError):
+                m.local_session()
+        with patch.object(m.subprocess, 'run', side_effect=subprocess.TimeoutExpired('loginctl',2)), self.assertRaises(subprocess.TimeoutExpired):
+            m.local_session()
+        store = self.setup_store()
+        with patch.object(m, 'local_session', return_value={'uid':uid,'session_id':'fixture_session'}):
+            self.assertEqual(m.ipc('backend-local-session', store, dict(owner=m.LOCAL_OWNER,client_id=CLIENT))['uid'],uid)
+            with self.assertRaises(ValueError):
+                m.ipc('backend-local-session', store, dict(owner=OWNER,client_id=CLIENT))
+
+    def test_local_enrollment_rechecks_session_before_writing(self):
+        store = Fake()
+        values = iter([SECRET, SECRET])
+        with self.assertRaises(ValueError):
+            m.enrollment(store, lambda _:next(values), owner=m.LOCAL_OWNER, client=CLIENT,
+                         authorize=lambda:m.require(False))
+        self.assertEqual(store.rows,{})
+        values = iter([SECRET, SECRET])
+        m.enrollment(store, lambda _:next(values), owner=m.LOCAL_OWNER, client=CLIENT, authorize=lambda:True)
+        self.assertEqual(len(store.rows),1)
+
+    def test_oauth1_hidden_enrollment_readback_scope_and_no_overwrite(self):
+        store=Fake()
+        bundle={name:'fixture-'+name.lower() for name in m.OAUTH1_FIELDS}
+        values=iter(bundle.values())
+        receipt=m.oauth1_enrollment(store,lambda _:next(values),authorize=lambda:True)
+        self.assertTrue(receipt['storage_verified'])
+        self.assertFalse(receipt['account_verified'])
+        for value in bundle.values():self.assertNotIn(value,json.dumps(receipt))
+        with patch.object(m,'local_session',return_value={'uid':os.getuid(),'session_id':'fixture'}):
+            read=m.ipc('backend-read-oauth1',store,dict(client_id=m.OAUTH1_NAMESPACE,owner=m.LOCAL_OWNER))
+            self.assertEqual(read,bundle)
+            for changes in [dict(client_id='other'),dict(owner=OWNER),dict(extra=True)]:
+                with self.assertRaises(ValueError):m.ipc('backend-read-oauth1',store,{**dict(client_id=m.OAUTH1_NAMESPACE,owner=m.LOCAL_OWNER),**changes})
+        with patch.object(m,'local_session',side_effect=ValueError):
+            with self.assertRaises(ValueError):m.ipc('backend-read-oauth1',store,dict(client_id=m.OAUTH1_NAMESPACE,owner=m.LOCAL_OWNER))
+        values=iter(bundle.values())
+        with self.assertRaises(ValueError):m.oauth1_enrollment(store,lambda _:next(values),authorize=lambda:True)
+        for bad in ['', 'bad\nheader', 'x'*1025]:
+            with self.assertRaises(ValueError):m.oauth1_bundle({**bundle,'X_API_KEY':bad})
+        with self.assertRaises(ValueError):m.oauth1_bundle({**bundle,'extra':'bad'})
+
+    def test_oauth1_noninteractive_setup_never_echoes_or_stores_input(self):
+        result=subprocess.run(['/usr/bin/python3','-I',str(ROOT/'scripts/x-oauth-keyring.py'),'setup-oauth1'],
+                              input=SECRET.encode(),capture_output=True,timeout=3)
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotIn(SECRET.encode(),result.stdout+result.stderr)
+        self.assertEqual(result.stdout,b'')
+
 
 def isolated_service():
     assert os.environ.get('SUPA_X_KEYRING_ISOLATED_TEST') == '1'
@@ -142,6 +205,8 @@ def isolated_service():
         daemon, store = start()
         values = iter([OWNER, CLIENT, SECRET, SECRET])
         m.enrollment(store, lambda _: next(values))
+        oauth1_values=iter('fixture-'+name.lower() for name in m.OAUTH1_FIELDS)
+        m.oauth1_enrollment(store,lambda _:next(oauth1_values),authorize=lambda:True)
         public = json.dumps(dict(owner=OWNER, client_id=CLIENT)).encode()
         result = subprocess.run(['/usr/bin/python3', '-I', str(ROOT/'scripts/x-oauth-keyring.py'), 'backend-read'],
                                 input=public, capture_output=True, timeout=7)
@@ -151,7 +216,13 @@ def isolated_service():
         if binary:
             binary = Path(binary).resolve()
             assert binary.parent == ROOT/'target/work-review-validation/debug/deps'
-            result = subprocess.run([str(binary), '--exact', 'x_oauth::local::tests::private_keyring_bridge_reads_and_retains_only_in_disposable_session', '--ignored'], capture_output=True, timeout=20)
+            bridge_env=dict(os.environ)
+            try:
+                m.local_session()
+                bridge_env['SUPA_X_KEYRING_LOCAL_SESSION_TEST']='1'
+            except Exception:
+                bridge_env.pop('SUPA_X_KEYRING_LOCAL_SESSION_TEST',None)
+            result = subprocess.run([str(binary), '--exact', 'x_oauth::local::tests::private_keyring_bridge_reads_and_retains_only_in_disposable_session', '--ignored'], env=bridge_env, capture_output=True, timeout=20)
             assert result.returncode == 0 and b'1 passed' in result.stdout, result.stdout.decode(errors='replace')[:3000]
         duplicate = iter([OWNER, CLIENT, SECRET, SECRET])
         try:
@@ -160,13 +231,13 @@ def isolated_service():
         except ValueError:
             pass
         # Only this disposable keyring's encrypted files are inspected.
-        assert all(all(secret not in p.read_bytes() for secret in [SECRET.encode(), b'fixture-access-token-only']) for p in Path(os.environ['HOME']).rglob('*') if p.is_file())
+        assert all(all(secret not in p.read_bytes() for secret in [SECRET.encode(), b'fixture-access-token-only', b'fixture-x_api_secret', b'fixture-x_access_secret']) for p in Path(os.environ['HOME']).rglob('*') if p.is_file())
         daemon.terminate()
         daemon.wait(timeout=3)
         daemon, _ = start(fresh=True)
         subprocess.run(['/usr/bin/python3', '-I', __file__, '--verify-restored'], check=True, timeout=7)
         print(json.dumps(dict(isolated_keyring=True, encrypted_at_rest=True, restart_persistence=True,
-                              locked_denied=True, scoped_read=True, duplicates_denied=True, real_custody_operations=0, rust_bridge_verified=bool(os.environ.get('SUPA_X_KEYRING_RUST_TEST')))))
+                              locked_denied=True, scoped_read=True, duplicates_denied=True, real_custody_operations=0, rust_bridge_verified=bool(os.environ.get('SUPA_X_KEYRING_RUST_TEST')), oauth1_rust_bridge_verified=bool(binary and bridge_env.get('SUPA_X_KEYRING_LOCAL_SESSION_TEST')))))
     finally:
         if daemon is not None and daemon.poll() is None:
             daemon.terminate()
@@ -179,6 +250,7 @@ if __name__ == '__main__':
         assert Path(os.environ['HOME']).parent.name.startswith('supa-x-keyring-')
         store = m.Keyring()
         assert store.get(CLIENT, OWNER, 'configuration')['client_secret'] == SECRET
+        assert set(store.get(m.OAUTH1_NAMESPACE,m.LOCAL_OWNER,'oauth1')) == set(m.OAUTH1_FIELDS)
         if os.environ.get('SUPA_X_KEYRING_RUST_TEST'):
             assert store.get(CLIENT, OWNER, 'connection')['account_id'] == '123'
         assert not store.items(CLIENT, '00000000-0000-0000-0000-000000000002', 'configuration')
