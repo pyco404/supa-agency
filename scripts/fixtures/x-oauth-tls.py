@@ -52,9 +52,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 time.sleep(6)
         elif self.command == 'GET' and self.path == '/2/users/me':
             assert self.headers['Authorization'] == 'Bearer fixture-access-token-only'
-            result = {'data': {'id': '123', 'username': 'other' if mode == 'account' else 'supa_agency'}}
+            result = {'data': {'id': '123', 'username': 'other' if mode in ['account', 'posting_account'] else 'supa_agency'}}
             if mode == 'partial':
                 result['errors'] = [{'message': 'synthetic partial error'}]
+        elif self.command == 'POST' and self.path == '/2/tweets' and mode.startswith('posting_'):
+            assert self.headers['Authorization'] == 'Bearer fixture-access-token-only'
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            assert set(body) == {'text'} and body['text'] == 'A genuine synthetic fixture result.'
+            status = {'posting_rate': 429, 'posting_credits': 402, 'posting_expired': 401,
+                      'posting_server': 503, 'posting_redirect': 302}.get(mode, 201)
+            headers = {'x-rate-limit-reset': '123456'}
+            if mode == 'posting_redirect':
+                headers['Location'] = 'https://example.invalid/never-follow'
+            if mode == 'posting_disconnect':
+                self.close_connection = True
+                return
+            result = {'data': {'id': '456', 'text': body['text']}}
         else:
             status, result = 400, {}
         raw = json.dumps(result).encode()
