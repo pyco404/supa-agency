@@ -76,7 +76,7 @@ createServer(async (request, response) => {
   const canonical = path === '/home' || path === '/home/' ? '/' : navigation.find(item=>item.path!=='/' && path===item.path+'/')?.path;
   if(canonical){response.writeHead(308,{Location:canonical+new URL(request.url,'http://localhost').search});return response.end();}
   const file = navigation.some(item=>item.path===path) || path === "/" || path === "/site" || path === "/site/" ? "index.html" : path.slice(1);
-  const isPublic = file.startsWith("public/") && file.split("/").every(part => part && !part.startsWith(".")) && (publicExtensions.has(extname(file)) || /^public\/assets\/supa-(economy|social|trading|factory)-loop\.(webm|mp4)$/.test(file) || file === "public/fonts/OFL.txt");
+  const isPublic = file.startsWith("public/") && file.split("/").every(part => part && !part.startsWith(".")) && (publicExtensions.has(extname(file)) || /^public\/assets\/supa-((economy|social|trading|factory)-loop|factory-artwork-loop)\.(webm|mp4)$/.test(file) || file === "public/fonts/OFL.txt");
   if (!appFiles.has(file) && !isPublic) {
     response.writeHead(404,{'Content-Type':'text/html; charset=utf-8'});
     return response.end(request.method==='HEAD'?undefined:await readFile(resolve(root,'not-found.html')));
