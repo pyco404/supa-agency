@@ -1,13 +1,19 @@
-//! OAuth 1.0a identity-only adapter. No POST, consent flow, refresh or publishing.
-use super::{IDENTITY_ENDPOINT, live::numeric_id};
+//! OAuth 1.0a identity and explicitly reserved text-only posting. No activation or retries.
+use super::{
+    IDENTITY_ENDPOINT, MockAccount, MockDispatchGuard, MockResponse, MockXAdapter, MockXTransport,
+    POST_ENDPOINT, XReceipt, live::numeric_id,
+};
 use crate::x_oauth::local::{PrivateKeyring, authorization::AuthorizationReceipt};
+use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use ring::{
     hmac,
     rand::{SecureRandom, SystemRandom},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use supa_domain::social_review::safe_post;
 use supa_domain::{Error, Result};
 use zeroize::Zeroizing;
 
@@ -60,8 +66,11 @@ impl Credentials {
         }
         Ok(())
     }
-    fn header(&self, url: &str, nonce: &str, at: u64) -> Result<Zeroizing<String>> {
+    fn header(&self, method: &str, url: &str, nonce: &str, at: u64) -> Result<Zeroizing<String>> {
         self.validate()?;
+        if !matches!(method, "GET" | "POST") {
+            return Err(Error::Denied);
+        }
         let mut params: Vec<(&str, &str)> = vec![
             ("oauth_consumer_key", &*self.api_key),
             ("oauth_nonce", nonce),
@@ -79,7 +88,7 @@ impl Credentials {
                 .collect::<Vec<_>>()
                 .join("&"),
         );
-        let base = Zeroizing::new(format!("GET&{}&{}", encode(url), encode(&normalized)));
+        let base = Zeroizing::new(format!("{method}&{}&{}", encode(url), encode(&normalized)));
         let signing_key = Zeroizing::new(format!(
             "{}&{}",
             encode(&self.api_secret),
@@ -131,7 +140,7 @@ impl IdentityClient {
             .fill(&mut nonce)
             .map_err(|_| Error::Denied)?;
         let nonce = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        let auth = credentials.header(&self.endpoint, &nonce, now()?)?;
+        let auth = credentials.header("GET", &self.endpoint, &nonce, now()?)?;
         let mut header =
             reqwest::header::HeaderValue::from_str(&auth).map_err(|_| Error::Denied)?;
         header.set_sensitive(true);
@@ -204,6 +213,292 @@ pub async fn verify_official_account(
     authorization.check()?;
     Ok(receipt)
 }
+/// Exact caller-approved reservation. This is data, never authority by itself.
+/// The required durable guard must bind account/text, owner, expiry and budget,
+/// consume one attempt, and preserve uncertain-account quarantine across restarts.
+pub struct ReservedPost<'a> {
+    pub account: MockAccount,
+    pub text: &'a str,
+    pub text_sha256: &'a str,
+    pub expires_unix: u64,
+    pub budget_microusd: u64,
+}
+impl ReservedPost<'_> {
+    fn validate(&self, at: u64) -> Result<()> {
+        safe_post(self.text)?;
+        if self.account.mode != "live"
+            || self.account.username != "supa_agency"
+            || !numeric_id(&self.account.id)
+            || super::text_sha256(self.text) != self.text_sha256
+            || self.expires_unix <= at
+            || self.expires_unix > at.saturating_add(600)
+            || self.budget_microusd != 25000
+        {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    }
+}
+struct PostingTransport<'a> {
+    client: reqwest::Client,
+    credentials: Credentials,
+    identity_url: String,
+    post_url: String,
+    session: Option<&'a AuthorizationReceipt>,
+    live_authorization: Option<&'a super::live::LiveAuthorization>,
+    expires: u64,
+}
+#[async_trait]
+impl MockXTransport for PostingTransport<'_> {
+    async fn exchange(&self, path: &str, body: Option<Value>, _: &str) -> Result<MockResponse> {
+        if now()? >= self.expires {
+            return Err(Error::Denied);
+        }
+        if let Some(session) = self.session {
+            session.check()?;
+        }
+        if let Some(live) = self.live_authorization {
+            live.check()?;
+        }
+        // A session observation cannot extend the post reservation deadline.
+        if now()? >= self.expires {
+            return Err(Error::Denied);
+        }
+        let (method, endpoint, request) = match (path, body) {
+            ("/2/users/me", None) => (
+                "GET",
+                &self.identity_url,
+                self.client.get(&self.identity_url),
+            ),
+            ("/2/tweets", Some(body))
+                if body
+                    .as_object()
+                    .is_some_and(|m| m.len() == 1 && m.contains_key("text")) =>
+            {
+                safe_post(body["text"].as_str().ok_or(Error::Denied)?)?;
+                // JSON body fields are not OAuth form parameters. TLS and the exact-text guard protect the body.
+                (
+                    "POST",
+                    &self.post_url,
+                    self.client.post(&self.post_url).json(&body),
+                )
+            }
+            _ => return Err(Error::Denied),
+        };
+        let mut nonce = [0; 16];
+        SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| Error::Denied)?;
+        let nonce = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let auth = self.credentials.header(method, endpoint, &nonce, now()?)?;
+        let mut header =
+            reqwest::header::HeaderValue::from_str(&auth).map_err(|_| Error::Denied)?;
+        header.set_sensitive(true);
+        let mut response = request
+            .header(reqwest::header::AUTHORIZATION, header)
+            .send()
+            .await
+            .map_err(|_| Error::ProviderTransport)?;
+        let status = response.status().as_u16();
+        let rate_limit_reset = response
+            .headers()
+            .get("x-rate-limit-reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok());
+        if !(200..300).contains(&status) {
+            return Ok(MockResponse {
+                status,
+                body: vec![],
+                rate_limit_reset,
+            });
+        }
+        if response.content_length().is_some_and(|n| n > 16384)
+            || !response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.split(';').next() == Some("application/json"))
+        {
+            return Err(Error::Provider);
+        }
+        let mut bytes = Zeroizing::new(Vec::new());
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| Error::ProviderTransport)?
+        {
+            if bytes.len() + chunk.len() > 16384 {
+                return Err(Error::Provider);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(MockResponse {
+            status,
+            body: bytes.to_vec(),
+            rate_limit_reset,
+        })
+    }
+}
+async fn authorize_reservation(
+    post: &ReservedPost<'_>,
+    guard: &dyn MockDispatchGuard,
+) -> Result<()> {
+    post.validate(now()?)?;
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        guard.authorize_exact(post.text_sha256, &post.account),
+    )
+    .await
+    .map_err(|_| Error::Denied)??;
+    Ok(())
+}
+/// No connection or environment flag grants posting authority. Caller MUST reserve
+/// durably first and settle the returned receipt (or quarantine interrupted work).
+/// Fixed price reservation covers one identity read + one text-only create.
+pub async fn dispatch_reserved_once(
+    authorization: &AuthorizationReceipt,
+    post: &ReservedPost<'_>,
+    guard: &dyn MockDispatchGuard,
+) -> Result<XReceipt> {
+    dispatch(authorization, post, guard, None).await
+}
+pub(super) async fn dispatch_reserved_live(
+    authorization: &AuthorizationReceipt,
+    post: &ReservedPost<'_>,
+    guard: &dyn MockDispatchGuard,
+    live: &super::live::LiveAuthorization,
+) -> Result<XReceipt> {
+    dispatch(authorization, post, guard, Some(live)).await
+}
+async fn dispatch(
+    authorization: &AuthorizationReceipt,
+    post: &ReservedPost<'_>,
+    guard: &dyn MockDispatchGuard,
+    live: Option<&super::live::LiveAuthorization>,
+) -> Result<XReceipt> {
+    post.validate(now()?)?;
+    let owner = "6fd863e1-745d-4a06-b68e-eea69e854a69"
+        .parse()
+        .map_err(|_| Error::Denied)?;
+    if !authorization.matches(owner, NAMESPACE) {
+        return Err(Error::Denied);
+    }
+    authorization.check()?;
+    // Check durable authorization before even reading credentials or spending.
+    authorize_reservation(post, guard).await?;
+    authorization.check()?;
+    let raw = PrivateKeyring::new(owner)?.read_oauth1_env()?;
+    let credentials: Credentials = serde_json::from_slice(&raw).map_err(|_| Error::KeyVault)?;
+    credentials.validate()?;
+    let identity = IdentityClient::new()?;
+    let wire = PostingTransport {
+        client: identity.client,
+        credentials,
+        identity_url: identity.endpoint,
+        post_url: POST_ENDPOINT.into(),
+        session: Some(authorization),
+        live_authorization: live,
+        expires: post.expires_unix,
+    };
+    let adapter = MockXAdapter::prepared_live(
+        wire,
+        Zeroizing::new(String::new()),
+        post.account.clone(),
+        post.expires_unix,
+    )?;
+    Ok(adapter
+        .execute_reserved_once(post.text, post.text_sha256, now()?, guard)
+        .await)
+}
+/// Offline credential availability only, used before a durable reservation.
+pub(crate) fn credentials_available(authorization: &AuthorizationReceipt) -> Result<()> {
+    let owner = "6fd863e1-745d-4a06-b68e-eea69e854a69"
+        .parse()
+        .map_err(|_| Error::Denied)?;
+    if !authorization.matches(owner, NAMESPACE) {
+        return Err(Error::Denied);
+    }
+    authorization.check()?;
+    let raw = PrivateKeyring::new(owner)?.read_oauth1_env()?;
+    let credentials: Credentials = serde_json::from_slice(&raw).map_err(|_| Error::KeyVault)?;
+    credentials.validate()
+}
+#[cfg(test)]
+pub(crate) async fn test_posting(client: reqwest::Client, origin: &str, allowed: bool) -> XReceipt {
+    assert!(origin.starts_with("https://127.0.0.1:"));
+    struct Guard(bool);
+    #[async_trait]
+    impl MockDispatchGuard for Guard {
+        async fn authorize_exact(&self, _: &str, _: &MockAccount) -> Result<()> {
+            if self.0 { Ok(()) } else { Err(Error::Denied) }
+        }
+    }
+    let credentials:Credentials=serde_json::from_value(serde_json::json!({"X_API_KEY":"fixture-consumer-key","X_API_SECRET":"fixture-consumer-secret","X_ACCESS_TOKEN":"fixture-access-token","X_ACCESS_SECRET":"fixture-access-secret"})).unwrap();
+    let wire = PostingTransport {
+        client,
+        credentials,
+        identity_url: format!("{origin}/2/users/me"),
+        post_url: format!("{origin}/2/tweets"),
+        session: None,
+        live_authorization: None,
+        expires: now().unwrap() + 60,
+    };
+    let text = "Supa Agent reporting for onboarding. Our official X account is connected and its identity verified. Autonomous posting is still off. Apparently even AI needs a permission slip.";
+    let hash = super::text_sha256(text);
+    let post = ReservedPost {
+        account: MockAccount {
+            id: "123".into(),
+            username: "supa_agency".into(),
+            mode: "live".into(),
+        },
+        text,
+        text_sha256: &hash,
+        expires_unix: now().unwrap() + 60,
+        budget_microusd: 25000,
+    };
+    if authorize_reservation(&post, &Guard(allowed)).await.is_err() {
+        return XReceipt {
+            mode: "live".into(),
+            state: "failed".into(),
+            category: "approval_revoked_or_unavailable".into(),
+            post_id: None,
+            http_status: None,
+            rate_limit_reset: None,
+        };
+    }
+    let adapter = MockXAdapter::prepared_live(
+        wire,
+        Zeroizing::new(String::new()),
+        MockAccount {
+            id: "123".into(),
+            username: "supa_agency".into(),
+            mode: "live".into(),
+        },
+        now().unwrap() + 60,
+    )
+    .unwrap();
+    let result = adapter
+        .execute_reserved_once(
+            text,
+            &super::text_sha256(text),
+            now().unwrap(),
+            &Guard(allowed),
+        )
+        .await;
+    assert_eq!(
+        adapter
+            .execute_reserved_once(
+                text,
+                &super::text_sha256(text),
+                now().unwrap(),
+                &Guard(true)
+            )
+            .await
+            .category,
+        "attempt_already_consumed"
+    );
+    result
+}
 #[cfg(test)]
 pub(crate) async fn test_identity(
     client: reqwest::Client,
@@ -227,17 +522,62 @@ pub(crate) async fn test_identity(
 mod tests {
     use super::*;
     #[test]
+    fn reserved_posts_require_exact_identity_text_expiry_and_budget() {
+        let at = now().unwrap();
+        let text = "Supa Agent reporting for onboarding. Our official X account is connected and its identity verified. Autonomous posting is still off. Apparently even AI needs a permission slip.";
+        let hash = super::super::text_sha256(text);
+        let make = || ReservedPost {
+            account: MockAccount {
+                id: "123".into(),
+                username: "supa_agency".into(),
+                mode: "live".into(),
+            },
+            text,
+            text_sha256: &hash,
+            expires_unix: at + 60,
+            budget_microusd: 25000,
+        };
+        make().validate(at).unwrap();
+        for expiry in [at, at + 601] {
+            let mut p = make();
+            p.expires_unix = expiry;
+            assert!(p.validate(at).is_err());
+        }
+        for budget in [0, 15000, 24999, 25001] {
+            let mut p = make();
+            p.budget_microusd = budget;
+            assert!(p.validate(at).is_err());
+        }
+        for id in ["0", "01", "other", "18446744073709551616"] {
+            let mut p = make();
+            p.account.id = id.into();
+            assert!(p.validate(at).is_err());
+        }
+        let mut p = make();
+        p.account.username = "other".into();
+        assert!(p.validate(at).is_err());
+        let mut p = make();
+        p.account.mode = "mock".into();
+        assert!(p.validate(at).is_err());
+        let mut p = make();
+        p.text = "Changed after approval.";
+        assert!(p.validate(at).is_err());
+        let mut p = make();
+        p.text_sha256 = "bad";
+        assert!(p.validate(at).is_err());
+    }
+    #[test]
     fn signing_encoding_and_fixed_fixture_are_deterministic() {
         assert_eq!(encode("!*'() +/"), "%21%2A%27%28%29%20%2B%2F");
         let credentials:Credentials=serde_json::from_value(serde_json::json!({"X_API_KEY":"fixture-consumer-key","X_API_SECRET":"fixture-consumer-secret",
             "X_ACCESS_TOKEN":"fixture-access-token","X_ACCESS_SECRET":"fixture-access-secret"})).unwrap();
         let first = credentials
-            .header(IDENTITY_ENDPOINT, "fixture-nonce", 1234567890)
+            .header("GET", IDENTITY_ENDPOINT, "fixture-nonce", 1234567890)
             .unwrap();
         assert_eq!(
             *first,
             *credentials
-                .header(IDENTITY_ENDPOINT, "fixture-nonce", 1234567890)
+                .header("GET", IDENTITY_ENDPOINT, "fixture-nonce", 1234567890)
                 .unwrap()
         );
         assert!(first.starts_with("OAuth "));
@@ -246,7 +586,7 @@ mod tests {
         assert_ne!(
             *first,
             *credentials
-                .header(IDENTITY_ENDPOINT, "other-nonce", 1234567890)
+                .header("GET", IDENTITY_ENDPOINT, "other-nonce", 1234567890)
                 .unwrap()
         );
     }
