@@ -64,6 +64,11 @@ pub trait MockXTransport: Send + Sync {
 }
 #[async_trait]
 pub trait MockDispatchGuard: Send + Sync {
+    /// Read-only reservation observation. Never consume the final dispatch claim.
+    /// OAuth1 fails closed until a durable implementation provides this check.
+    async fn check_reserved(&self, _: &str, _: &MockAccount) -> Result<()> {
+        Err(Error::Denied)
+    }
     async fn authorize_exact(&self, text_sha256: &str, account: &MockAccount) -> Result<()>;
 }
 /// One-shot protocol. Public construction is mock-only; live custody stays private.
