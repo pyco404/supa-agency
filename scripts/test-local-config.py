@@ -68,10 +68,22 @@ class Configuration(unittest.TestCase):
 
     def test_valid_and_missing_fields(self):
         self.assertEqual(m.validate(self.values), [])
-        for field in ['DATABASE_URL', 'SUPA_API_TOKEN', 'SUPA_WEB_PASSWORD', 'SUPA_X_CLIENT_ID', 'SUPA_X_OWNER_ID']:
+        for field in ['DATABASE_URL', 'SUPA_API_TOKEN', 'SUPA_WEB_PASSWORD', 'SUPA_X_CLIENT_ID']:
             values = dict(self.values, **{field: ''})
             self.assertIn(field, m.validate(values))
         self.assertEqual(m.validate(m.parse(self.template), 'mint'), [])
+
+    def test_local_x_setup_does_not_require_or_grant_platform_owner_identity(self):
+        values=dict(self.values, SUPA_X_OWNER_ID='')
+        self.assertEqual(m.validate(values,'x'),[])
+        self.assertIn('SUPA_X_OWNER_ID', m.validate(dict(values,SUPA_X_OWNER_ID='not-a-uuid'),'x'))
+        self.assertEqual(values['SUPA_X_OWNER_ID'],'')
+
+    def test_oauth1_configuration_requires_no_oauth2_client_or_platform_owner(self):
+        values=dict(self.values,SUPA_X_CLIENT_ID='',SUPA_X_OWNER_ID='')
+        self.assertEqual(m.validate(values,'x-oauth1'),[])
+        self.path.write_text(self.template+'\nX_ACCESS_TOKEN=fixture-not-allowed-in-dotenv\n')
+        with self.assertRaises(m.Invalid):m.load(self.root,{})
 
     def test_boundaries_disabled_capabilities_and_malformed(self):
         for key in m.DISABLED:
