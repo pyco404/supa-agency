@@ -118,6 +118,31 @@ class Configuration(unittest.TestCase):
         with patch.object(m,'ROOT',self.root),patch.object(m,'load',return_value=values),patch.object(m.sys,'argv',['local-config.py','x-first-post']),patch.object(m.os,'isatty',return_value=True):
             with self.assertRaises(m.Invalid):m.main()
 
+    def test_explicit_private_ledger_binding_is_scoped_and_rejects_unsafe_profiles(self):
+        binary=self.root/'target/work-review-validation/debug/supa-x-first-post'
+        binary.parent.mkdir(parents=True);binary.write_text('synthetic binary')
+        profile=self.root/'connection.env';profile.write_text('DATABASE_URL=postgresql://synthetic@127.0.0.1:55432/supa_x_first_post\n');profile.chmod(0o600)
+        values=dict(self.values,**{key:'synthetic-fixture-only' for key in m.OAUTH1_FIELDS})
+        original=dict(values)
+        class Launched(Exception):pass
+        argv=['local-config.py','x-first-post-ledger-check','--posting-ledger',str(profile)]
+        with patch.object(m,'ROOT',self.root),patch.object(m,'load',return_value=values),patch.object(m.sys,'argv',argv),patch.object(m.os,'chdir'),patch.object(m.os,'execve',side_effect=Launched) as launch:
+            with self.assertRaises(Launched):m.main()
+            _,args,env=launch.call_args.args
+            self.assertEqual(args[-1],'ledger-check')
+            self.assertTrue(env['DATABASE_URL'].endswith('/supa_x_first_post'))
+            for key in m.OAUTH1_FIELDS:self.assertNotIn(key,env)
+        self.assertEqual(values,original,'root settings must not be overwritten')
+        for body in ['DATABASE_URL=postgresql://synthetic@remote.invalid:5432/supa_x_first_post',
+                     'DATABASE_URL=postgresql://synthetic@127.0.0.1:55432/protected',
+                     'DATABASE_URL=postgresql://synthetic@127.0.0.1:55432/supa_x_first_post\nX_API_KEY=synthetic-extra']:
+            profile.write_text(body)
+            with patch.object(m,'load',return_value=values),patch.object(m.sys,'argv',argv):
+                with self.assertRaises(m.Invalid):m.main()
+        profile.chmod(0o644)
+        with patch.object(m,'load',return_value=values),patch.object(m.sys,'argv',argv):
+            with self.assertRaises(m.Invalid):m.main()
+
     def test_boundaries_disabled_capabilities_and_malformed(self):
         for key in m.DISABLED:
             for bad in ['true', '1', 'FALSE', '']:
