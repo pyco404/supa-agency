@@ -123,7 +123,7 @@ impl MockXTransport for Wire {
             body: if self.mode == "malformed" {
                 b"{".to_vec()
             } else {
-                serde_json::to_vec(&json!({"data":{"id":"456","text":body.unwrap()["text"]}}))
+                serde_json::to_vec(&json!({"data":{"id":if self.mode=="bad_id"{"0"}else{"456"},"text":body.unwrap()["text"]}}))
                     .unwrap()
             },
             rate_limit_reset: Some(123456),
@@ -153,6 +153,7 @@ async fn live_protocol_reuses_identity_guard_receipts_and_never_retries() {
         (503, "ok", true, "uncertain", 2),
         (201, "disconnect", true, "uncertain", 2),
         (201, "malformed", true, "uncertain", 2),
+        (201, "bad_id", true, "uncertain", 2),
     ] {
         let wire = Wire {
             calls: Default::default(),
