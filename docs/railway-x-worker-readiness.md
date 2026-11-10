@@ -1,5 +1,11 @@
 # Railway autonomous X worker readiness
 
+Latest local status, 2026-11-10: the runtime remediation at the end of this report
+supersedes the earlier image security NO-GO. Both replacement targets passed the
+complete scans and container tests. They are ready for a separately authorized,
+private mock-only Railway rehearsal, not live publishing. Earlier assessments,
+image identities and scan results below remain historical evidence.
+
 Initial assessment, 2026-11-09 (Africa/Lagos). The container implementation below supersedes the packaging-pending assessment. Runtime baseline:
 `dff7e2acf8a14931322562e2f74b5ca5a8333528`. No deployment, credential transfer,
 ledger export/restore, live X request or activation is authorized by this document.
@@ -298,7 +304,7 @@ python3 scripts/test-x-worker-container.py
 python3 scripts/test-x-hosted-worker.py
 python3 scripts/validate-social-autonomy.py
 docker build --target mock -f deployment/x-worker.Dockerfile -t supa-x-worker:mock-local .
-python3 scripts/validate-x-worker-docker.py
+python3 scripts/validate-x-worker-docker.py --report-dir artifacts/x-worker-remediation/final
 ```
 
 The Docker rehearsal creates/removes only one new named test volume/container,
@@ -380,3 +386,98 @@ these images or bypass the findings to proceed. Only after that gate clears is
 one separately authorized private, credential-free mock Railway service/volume
 rehearsal appropriate. No service setup, credential transfer, ledger migration,
 account lookup, paid inference or X posting occurred during this validation.
+
+### Runtime security remediation — 2026-11-10
+
+The correction changes only the Docker recipe, the container validation harness,
+and this report. Worker, scheduler, ledger SQL, OAuth and supervision source are
+unchanged. Both replacement Rust executables are **byte-identical** to those in
+the previous images: mock SHA-256 `c6fc05bf556a81f54a76e8270c03051952a74210acacec0070aeb3789d0c664d`,
+live SHA-256 `74a6942a505d9face11b354abf8b5d540401898cf2e492abfbbe7a2a3019ba3e`.
+
+All 91 earlier CRITICAL/HIGH records were in final runtime layers; none came from
+the excluded Rust builder. Exact package versions, CVEs, fix status and full
+layer IDs are preserved in `artifacts/x-worker-remediation/baseline-attribution.json`.
+
+| Original layer (DiffID prefix) | Origin | CRITICAL/HIGH records |
+| --- | --- | ---: |
+| `1d7b9dd8778e` | Debian Bookworm root filesystem | 35 |
+| `9b536e93367c` | Worker Python/tini installation | 12 |
+| `aa38d5ea85a2` | Upstream gnupg/less installation | 8 |
+| `51747bf5584d` | Upstream PostgreSQL installation | 10 |
+| `7ac954ae7a14` | Unused gosu helper and embedded Go 1.24.6 runtime | 26 |
+
+Installed vulnerable libraries are distinguished from proven exploitation: the
+old worker never invoked gosu, and no exploitability claim is made for every
+Debian library finding. In particular, the scan marked the old zlib record
+`will_not_fix`. No reachability exception, suppression, or severity downgrade was
+used to pass the replacement image. The affected old packages/layers are absent.
+
+The new runtime uses the official [Wolfi base](https://www.chainguard.dev/docs/open-source/wolfi),
+pinned to `sha256:d13acb327aa77acf2752acea8c08456511a5b8142455cc2fe0f966b960bf64c6`.
+It retains glibc compatibility with the existing Rust executables. Signed APK
+installation pins PostgreSQL server/client `18.6-r7`, Python runtime
+`3.14.10_git20261104-r0`, tini `0.19.0-r26`, CA bundle `20261020-r0` and BusyBox
+`1.38.0-r3`; installed transitive versions/checksums remain in the scanner inventory.
+The normal package resolver is used without untrusted-package or broken-world
+flags. Both the unnecessary `wolfi-base` metapackage and `apk-tools` are removed
+after installation; keeping the metapackage alone would retain the package manager.
+The installed-package database stays available to scanners.
+
+There is no gosu, Go helper, Bash, package manager, Rust toolchain, compiler or git
+in the final runtime. BusyBox `sh` remains because PostgreSQL initdb/pg_ctl use it.
+Path aliases preserve `/usr/lib/postgresql/18/bin` and existing client commands;
+no supervisor or ledger rewrite is needed. `STOPSIGNAL SIGTERM` is explicit rather
+than inherited. UID/GID 10001, default pause, read-only health reporting, credential
+paths, volume lease and authority checks remain intact.
+
+Representative replaced packages are SQLite `3.54.1-r0`, libxml2 `2.15.0-r0`
+(plus the LLVM-required compatibility package `2.13.9-r2`) and zlib
+`1.3.2.1_rc20260921-r2`. Their exact inventories and scanner results are retained;
+there are no remaining reported vulnerabilities requiring fixes in either image.
+
+| Final local image | Configuration ID | Uncompressed bytes |
+| --- | --- | ---: |
+| Mock | `sha256:38e296cc6e9b4689aaeec6a2905edba4038c86917fcc558aa0406d866b9ce143` | 349,829,037 |
+| Live | `sha256:2bd913edc55b1e6447a2c0d08788a89cc78173e55265cff8e8f9250bcc0b276a` | 351,842,218 |
+
+These linux/amd64 images are approximately 28% smaller than the originals.
+Configuration IDs are local identities, not published registry manifest digests.
+
+- Both complete targets rebuilt successfully. Trivy 0.76.1 with a freshly
+  downloaded database inventoried 60 runtime packages per image and reported
+  **0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW, 0 UNKNOWN and 0 embedded secrets**.
+  Scans used `/dev/null` as the ignore file, all severities, and no ignore-unfixed
+  option. Report image IDs match the exact built/tested configurations.
+- A separate current Cargo.lock scan inventoried 274 packages and found zero
+  vulnerabilities. The Debian Rust compiler stage remains build-only and is not
+  represented as a vulnerability-free runtime component.
+- All nine worker tests and three existing hosted-worker checks passed. The six
+  existing PostgreSQL regression tests passed locally and again inside the new
+  PostgreSQL 18.6 image, including both restart tests and permission boundaries.
+  Host test executables were mode 0700; verified byte-identical executable copies
+  were mounted read-only for the non-root test process, leaving originals untouched.
+- All nine Docker checks passed: non-root/default pause, minimal runtime and TLS,
+  one-publisher exclusion, bounded mock dispatch, duplicate/spacing enforcement,
+  restart continuation without repost, uncertain-outcome quarantine, preserved
+  audit/history and clean SIGTERM shutdown. Runtime TLS checks verified glibc
+  2.44, Python's OpenSSL 4.0.3, 118 trusted CAs, required certificate verification
+  and hostname checking. The X transport's Rust TLS code/binary is unchanged;
+  no live X handshake or account request was performed.
+- Observed aggregate RSS was 123,320 KiB (about 120 MiB). This is a snapshot with
+  shared pages counted more than once, not a peak/cgroup guarantee. Railway
+  resource ceilings remain to be verified in the approved hosted rehearsal.
+- Live offline smoke checks passed: a missing imported ledger fails closed and
+  no mock dispatcher or fixture is present in the live target.
+
+Reports are private under `artifacts/x-worker-remediation/`, separately from the
+preserved baseline evidence. `security-summary.json`, `images.json`, complete
+scans, installed-package inventories, scanner provenance, final rehearsal and
+PostgreSQL logs record the result. Initial failed minimality/fixture checks are
+retained as well; no mandatory check was removed or treated as a success.
+
+**GO for one separately authorized private mock-only rehearsal.** No push,
+publication, Railway change, real ledger access, credential transfer, paid request
+or live post occurred. The existing reviewed restore/schema/receipt comparisons
+remain mandatory before any future live ledger cutover; this fresh synthetic
+test does not authorize copying a real cluster or activating publishing.
