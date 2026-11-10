@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """Disposable Docker rehearsal; existing mock image only, no pulls/builds/live secrets."""
+import argparse
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+import textwrap
 import time
 import uuid
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--report-dir', type=Path, default=Path('artifacts/x-worker-container'))
+    options = parser.parse_args()
     image = 'supa-x-worker:mock-local'
     docker = os.environ.get('SUPA_X_DOCKER_BINARY', 'docker')
     name = 'supa-x-rehearsal-' + uuid.uuid4().hex
@@ -52,11 +57,34 @@ def main():
         try:
             info = json.loads(run('image', 'inspect', image))[0]
             assert info['Config']['User'] == '10001:10001'
+            assert info['Config']['StopSignal'] == 'SIGTERM'
             report['image_id'] = info['Id']
             assert run('run', '--rm', '--network', 'none', '--entrypoint', 'cat', image, '/opt/supa-x/bundle-mode') == 'mock'
             run('run', '--rm', '--network', 'none', '--entrypoint', 'python3', image, '-c',
                 "from pathlib import Path;assert not Path('/opt/supa-x/bin/supa-x-autonomy').exists();assert not Path('/opt/supa-x/bin/supa-x-first-post').exists()")
             check('nonroot_image_without_live_dispatcher')
+            # Keep the actual installed-package inventory available to scanners.
+            # PostgreSQL initdb/pg_ctl require sh; Bash, build tools, the package
+            # manager and privilege-switching helper are not runtime dependencies.
+            runtime_probe = textwrap.dedent('''
+                import json, os, shutil, ssl
+                from pathlib import Path
+                assert Path('/lib/apk/db/installed').is_file()
+                assert 'wolfi' in Path('/etc/os-release').read_text()
+                assert all(shutil.which(p) is None for p in
+                           ('apk', 'bash', 'gosu', 'cargo', 'rustc', 'gcc', 'cc', 'make', 'clang', 'git'))
+                assert not Path('/usr/local/bin/gosu').exists()
+                ctx = ssl.create_default_context()
+                assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
+                assert len(ctx.get_ca_certs()) > 0
+                print(json.dumps({'libc': os.confstr('CS_GNU_LIBC_VERSION'),
+                                  'tls': ssl.OPENSSL_VERSION,
+                                  'trusted_ca_count': len(ctx.get_ca_certs())}))
+            ''')
+            runtime = json.loads(run('run', '--rm', '--network', 'none', '--entrypoint', 'python3', image,
+                                     '-c', runtime_probe))
+            report['runtime'] = runtime
+            check('minimal_glibc_runtime_without_build_tools_and_with_verified_tls_defaults')
             run('volume', 'create', volume)
             created = True
             # Owner-only initialization of a new disposable volume. The publisher
@@ -126,7 +154,7 @@ def main():
             if created:
                 run('volume', 'rm', volume)
             report['temporary_resources_removed'] = True
-            out = Path('artifacts/x-worker-container')
+            out = options.report_dir
             out.mkdir(mode=0o700, parents=True, exist_ok=True)
             (out / 'rehearsal.json').write_text(json.dumps(report, indent=2) + '\n')
             print(json.dumps(report, indent=2))
