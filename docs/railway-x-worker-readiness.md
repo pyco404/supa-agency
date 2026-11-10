@@ -481,3 +481,71 @@ publication, Railway change, real ledger access, credential transfer, paid reque
 or live post occurred. The existing reviewed restore/schema/receipt comparisons
 remain mandatory before any future live ledger cutover; this fresh synthetic
 test does not authorize copying a real cluster or activating publishing.
+
+
+## Worker release isolation — November 10, 2026
+
+The existing staging `supa-web` service is connected to application `main`.
+Its watch paths were previously empty and no config-as-code manifest was active.
+Only its watch-path setting was updated; no deploy was requested. Readback
+confirmed the current frontend, API and PostgreSQL deployment IDs and sources
+remained unchanged. API and PostgreSQL use immutable images and have no GitHub
+repository triggers.
+
+Frontend watch paths now cover:
+
+- `/web/**` (including dependencies, lockfile, Next configuration and shared web modules)
+- `/reference-web/**` (including page artwork, navigation media and shared scripts)
+- `/deployment/frontend-railway.Dockerfile`
+- `/deployment/frontend-railway.Dockerfile.dockerignore`
+- `/deployment/frontend.railway.toml`
+- `/scripts/scan-secrets.py`
+- `/scripts/test-public-landing.mjs`
+- `/.dockerignore`, `/railway.toml`, `/railway.json` (root build/config fallbacks)
+
+The frontend Docker recipe copies no Rust crates or Cargo manifests. Its 33
+checked source/build inputs match the policy; the worker release paths do not.
+Railway documents watch paths as gitignore-style patterns. This preparation
+checks those semantics and the server-side readback; it does not claim an
+unperformed GitHub webhook test. If config-as-code is connected later, maintain
+these exclusions and dependency coverage in that manifest too.
+
+The isolated source is based on GitHub `main` at
+`245fdd71001c68504f854cead0916c3d7cb38a95`. It transplants 130 existing one-file
+commits for the X libraries, SQL, worker/container implementation, regressions
+and shared literal-configuration dependencies. This new audit note is a separate
+one-file commit. The private `.env`, credentials, real ledger, newer reasoning,
+Factory, trading, API and website changes are excluded. Original local `main`
+and all its unpublished history remain preserved. The named release reference
+is `release/x-worker-mock-20261110`; no branch is pushed during preparation.
+
+The isolated runtime source passed locked/offline compilation, 66 Rust tests
+(23 separately provisioned provider/custody tests remain ignored), six disposable
+PostgreSQL 18.3 integration/restart checks, nine worker tests and three hosted
+contract tests. The retained validated PostgreSQL 18.6 mock container separately
+passed nine fresh Docker checks with networking disabled, including non-root,
+paused startup, single publisher, durable history and uncertainty quarantine.
+Fresh all-severity Trivy scans of both retained images found zero vulnerabilities
+and zero secrets. Those retained images belong to the previously validated
+source, not a successful build of this new isolated release tree.
+
+Fresh isolated-tree Docker validation remains **blocked by local resources**.
+An initial temporary rootless build lacked default container networking; a
+build-only network selection resolved DNS. The subsequent build was stopped at
+the owner's instruction, not accepted as passing. Its daemon, stopped containers,
+images, logs and files are retained. No proposed cleanup is authorized or done.
+No real X credentials or posting records were transferred, and no paid API calls,
+GitHub builds, publication or Railway worker services were created.
+
+Prefer one manual artifact-free `ubuntu-24.04` validation job after its source
+availability and authorization are resolved. Build/test both targets on the same
+runner, run full vulnerability/secrets gates and mock-only PostgreSQL/container
+checks, and record sanitized summaries and hashes. Do not upload image archives,
+require registry write permission, publish, deploy, or supply X credentials.
+GitHub source publication and a runner launch require separate approval while
+pushes remain prohibited pending validation. Existing frontend-native validation
+is a reusable runner pattern, not an existing X-worker validation workflow.
+
+**NO-GO for a new isolated-image rehearsal until its complete Docker validation
+passes.** Frontend watch isolation is configured; it does not waive any worker
+security, resource, paused-mode or storage-ownership prerequisite.
