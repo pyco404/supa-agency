@@ -1,5 +1,5 @@
-//! Finite, request-driven offline task steps. Never calls the configured reasoner,
-//! cycle executor, provider, wallet, scheduler, economic settlement or publisher.
+//! Finite request-driven task steps; real inference uses only the separately gated
+//! task adapter. Never invokes autonomous cycles, wallets, schedulers or publishing.
 use super::*;
 use serde_json::{Value, json};
 use std::time::Instant;
@@ -14,11 +14,61 @@ impl Runtime {
         command.validate()?;
         let mut body = serde_json::to_value(command).map_err(|_| Error::Invalid)?;
         body["task_id"] = json!(task);
+        if command.operation == "review" {
+            let current = self
+                .store
+                .supervised(actor, "get", json!({"task_id":task}))
+                .await?;
+            body["payload"] = crate::supervised_reasoning::reviewed_reasoning_memory(&current)?;
+        }
         if command.operation == "advance" {
             let current = self
                 .store
                 .supervised(actor, "get", json!({"task_id":task}))
                 .await?;
+            if current["input"]["reasoning"].is_object() && current["step"] != 0 {
+                if current["input"]["reasoning"]["real"].is_object() {
+                    // One operator-approved evaluation identity and task, never a global AI switch.
+                    if std::env::var("SUPA_SUPERVISED_REAL_TASK_ID")
+                        .ok()
+                        .as_deref()
+                        != Some(task.to_string().as_str())
+                        || std::env::var("SUPA_SUPERVISED_REAL_OWNER_ID")
+                            .ok()
+                            .as_deref()
+                            != Some(actor.to_string().as_str())
+                    {
+                        return Err(Error::Denied);
+                    }
+                    let plan: ReasoningPlan =
+                        serde_json::from_value(current["input"]["reasoning"].clone())
+                            .map_err(|_| Error::Invalid)?;
+                    // Task approval is not spending approval. A separately installed,
+                    // expiring one-budget receipt must bind the exact stored input.
+                    crate::supervised_reasoning::authorize_paid_scope(
+                        &plan,
+                        actor,
+                        task,
+                        current["input_sha256"].as_str().ok_or(Error::Denied)?,
+                        std::env::var("SUPA_SUPERVISED_SPENDING_APPROVAL")
+                            .ok()
+                            .as_deref(),
+                    )?;
+                    let provider =
+                        supa_providers::supervised_openai::SupervisedOpenAi::from_env(&plan)?;
+                    return self
+                        .supervised_reasoning_with_provider(actor, task, command, &provider)
+                        .await;
+                }
+                return self
+                    .supervised_reasoning_with_provider(
+                        actor,
+                        task,
+                        command,
+                        &supa_providers::supervised_mock::SupervisedMock,
+                    )
+                    .await;
+            }
             // CAS in the database rechecks revision and ownership after computation;
             // a concurrent pause, cancellation or revocation prevents any commit.
             body["payload"] = supervised_payload(&current)?;
