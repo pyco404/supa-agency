@@ -1,5 +1,10 @@
 //! Explicit model verification precedes the one generation request. No retries or tools hosted upstream.
 use super::*;
+pub trait ControlledDispatchGuard: Send + Sync {
+    fn authorize(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + '_>>;
+}
 #[async_trait]
 pub trait ControlledProvider: Send + Sync {
     fn policy(&self) -> InferencePolicy;
@@ -13,6 +18,17 @@ pub trait ControlledProvider: Send + Sync {
     }
     async fn work(&self, _input: &LiveWorkInput) -> Invocation<WorkProposal> {
         Invocation::unmetered(Err(Error::Denied))
+    }
+    /// Durable task fence, checked immediately before an actual inference send.
+    async fn supervised_work(
+        &self,
+        input: &LiveWorkInput,
+        guard: &dyn ControlledDispatchGuard,
+    ) -> Invocation<WorkProposal> {
+        if let Err(e) = guard.authorize().await {
+            return Invocation::unmetered(Err(e));
+        }
+        self.work(input).await
     }
     /// Proposal only. Callers must reserve provider costs and enforce owned context,
     /// finite consent, lifecycle fencing and review before persistence. No publication.
