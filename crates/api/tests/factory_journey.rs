@@ -15,6 +15,8 @@ use tower::ServiceExt;
 use uuid::Uuid;
 #[path = "support/avatars.rs"]
 mod avatar_tests;
+#[path = "support/reasoning.rs"]
+mod reasoning_tests;
 #[path = "support/supervised.rs"]
 mod supervised_tests;
 const OWNER: &str = "factory-synthetic-owner-credential-00000000";
