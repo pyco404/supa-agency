@@ -77,7 +77,13 @@ async fn command(
     };
     Ok(Json(
         tokio::time::timeout(
-            std::time::Duration::from_secs(4),
+            std::time::Duration::from_secs(
+                if std::env::var("SUPA_SUPERVISED_REAL_MODEL").as_deref() == Ok("true") {
+                    30
+                } else {
+                    4
+                },
+            ),
             s.runtime.supervised_command(p.id, id, &b),
         )
         .await
