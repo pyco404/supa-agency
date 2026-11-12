@@ -4,6 +4,7 @@ pub mod evaluation;
 pub mod health;
 pub mod live_work;
 pub mod supervised;
+pub mod supervised_reasoning;
 pub mod wallet;
 use std::{sync::Arc, time::Duration};
 use supa_capabilities::{REGISTRY, audit_name, authorize};
