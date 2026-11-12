@@ -61,6 +61,16 @@ pub struct ProviderDiagnostic {
     pub request_id: Option<String>,
     pub message_id: Option<String>,
     pub reported_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_code: Option<WorkRejectionCode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_path: Option<String>,
     pub failure: Option<ProviderFailure>,
     pub error_type: Option<String>,
     pub reported_usage: Option<ReportedUsage>,
@@ -78,6 +88,11 @@ impl ProviderDiagnostic {
             request_id: None,
             message_id: None,
             reported_model: None,
+            response_id: None,
+            response_status: None,
+            output_category: None,
+            validation_code: None,
+            validation_path: None,
             failure: None,
             error_type: None,
             reported_usage: None,
@@ -93,8 +108,13 @@ impl ProviderDiagnostic {
     }
     pub fn identifier(value: &str, prefix: &str) -> Option<String> {
         let rest = value.strip_prefix(prefix)?;
-        (!rest.is_empty() && rest.len() <= 96 && rest.bytes().all(|b| b.is_ascii_alphanumeric()))
-            .then(|| value.to_owned())
+        (!rest.is_empty()
+            && rest.len() <= 96
+            && !rest.contains("sk-")
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+        .then(|| value.to_owned())
     }
     pub fn validate(&self) -> Result<()> {
         if self.http_status.is_some_and(|n| !(100..=599).contains(&n))
@@ -108,9 +128,44 @@ impl ProviderDiagnostic {
                 .is_some_and(|s| Self::identifier(s, "msg_").is_none())
             || self.reported_model.as_ref().is_some_and(|s| {
                 s.contains("sk-")
-                    || !s.starts_with("claude-")
+                    || !(s.starts_with("claude-") || s == "gpt-6-luna")
                     || s.len() > 96
                     || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            })
+            || self
+                .response_id
+                .as_ref()
+                .is_some_and(|s| Self::identifier(s, "resp_").is_none())
+            || self.response_status.as_deref().is_some_and(|s| {
+                !matches!(
+                    s,
+                    "completed" | "incomplete" | "failed" | "cancelled" | "queued" | "in_progress"
+                )
+            })
+            || self.output_category.as_deref().is_some_and(|s| {
+                !matches!(
+                    s,
+                    "malformed_envelope"
+                        | "max_output_tokens"
+                        | "content_filter"
+                        | "incomplete"
+                        | "refusal"
+                        | "invalid_message"
+                        | "malformed_json"
+                        | "schema"
+                        | "evidence"
+                        | "usage"
+                        | "domain"
+                        | "response_too_large"
+                )
+            })
+            || self.validation_path.as_ref().is_some_and(|path| {
+                let error = WorkRejection::error(
+                    WorkValidationStage::Schema,
+                    WorkRejectionCode::SchemaMismatch,
+                    path,
+                );
+                WorkRejection::from_error(&error).field_path != *path
             })
             || self
                 .error_type
@@ -159,6 +214,24 @@ mod tests {
             assert!(ProviderDiagnostic::identifier(s, "req_").is_none());
         }
         assert!(ProviderDiagnostic::identifier("req_123ABC", "req_").is_some());
+        let mut safe = ProviderDiagnostic::new(
+            ProviderOperation::Generation,
+            ProviderStage::OutputValidation,
+        );
+        safe.reported_model = Some("gpt-6-luna".into());
+        safe.response_id = Some("resp_123ABC".into());
+        safe.request_id = Some("req_123-ABC_456".into());
+        safe.response_status = Some("incomplete".into());
+        safe.output_category = Some("max_output_tokens".into());
+        safe.validation_path = Some("/findings/0/evidence/0/quote".into());
+        assert!(safe.validate().is_ok());
+        for path in ["/private-content", "/summary/secret", "/findings/1234567"] {
+            safe.validation_path = Some(path.into());
+            assert!(safe.validate().is_err());
+        }
+        safe.validation_path = None;
+        safe.output_category = Some("private content".into());
+        assert!(safe.validate().is_err());
         let mut d = ProviderDiagnostic::deadline(ProviderOperation::Generation);
         d.error_type = Some("private response prose".into());
         assert!(d.validate().is_err());
