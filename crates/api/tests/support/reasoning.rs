@@ -482,6 +482,10 @@ pub async fn exercise(a: &Router, s: &Store, admin: &Store) {
     );
     let invalid_hashes:i64=sqlx::query_scalar("SELECT count(*) FROM agent_supervised.events WHERE sha256<>encode(sha256(convert_to(previous_sha256||body::text,'UTF8')),'hex')").fetch_one(admin.pool()).await.unwrap();
     assert_eq!(invalid_hashes, 0);
+    // Existing deterministic clients use a strict schema. The upgrade must not
+    // add even a null inference field to their established response shape.
+    let compatible: bool=sqlx::query_scalar("SELECT coalesce(bool_and(NOT (agent_supervised.view_task(t) ? 'inference')),false) FROM agent_supervised.tasks t WHERE NOT (t.input ? 'reasoning')").fetch_one(admin.pool()).await.unwrap();
+    assert!(compatible, "deterministic task response compatibility");
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/supervised/reasoning");
     std::fs::create_dir_all(&out).unwrap();
     std::fs::write(out.join("integration-result.json"),serde_json::to_vec_pretty(&json!({"passed":true,"mock_provider_only":true,"paid_requests":0,"two_owner_isolation":true,"approval_and_review":true,"single_request_concurrency":true,"rejection_and_usage":true,"cancellation_and_revocation":true,"atomic_settlement":true,"financial_tables_unchanged":true})).unwrap()).unwrap();
