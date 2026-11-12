@@ -9,9 +9,15 @@ pub struct SupervisedInput {
     pub material: String,
     pub synthetic_only: bool,
     pub retain_memory: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningPlan>,
 }
 impl SupervisedInput {
     pub fn validate(&self) -> Result<()> {
+        if let Some(plan) = &self.reasoning {
+            plan.validate()?;
+            reasoning_packet(plan, &self.task, &self.desired_outcome, &self.material)?;
+        }
         if !self.synthetic_only || self.material.len() > 4000 {
             return Err(Error::Invalid);
         }
@@ -46,6 +52,8 @@ pub struct SupervisedCommand {
     pub expected_revision: u32,
     pub input_sha256: String,
     pub confirmed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_sha256: Option<String>,
 }
 impl SupervisedCommand {
     pub fn validate(&self) -> Result<()> {
@@ -56,10 +64,20 @@ impl SupervisedCommand {
                 .input_sha256
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-            || !["approve", "start", "advance", "pause", "resume", "stop"]
-                .contains(&self.operation.as_str())
-            || (matches!(self.operation.as_str(), "approve" | "start" | "resume")
-                && !self.confirmed)
+            || ![
+                "approve", "start", "advance", "pause", "resume", "stop", "review",
+            ]
+            .contains(&self.operation.as_str())
+            || (matches!(
+                self.operation.as_str(),
+                "approve" | "start" | "resume" | "review"
+            ) && !self.confirmed)
+            || (self.operation == "review"
+                && !self.result_sha256.as_ref().is_some_and(|s| {
+                    s.len() == 64
+                        && s.bytes()
+                            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                }))
         {
             return Err(Error::Invalid);
         }
