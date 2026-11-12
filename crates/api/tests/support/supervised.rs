@@ -54,6 +54,10 @@ pub async fn exercise() {
         .execute(admin.pool())
         .await
         .unwrap();
+    sqlx::raw_sql(include_str!("../../../../deployment/agent-reasoning.sql"))
+        .execute(admin.pool())
+        .await
+        .unwrap();
     sqlx::raw_sql("GRANT USAGE ON SCHEMA agent_supervised TO supa_factory_runtime; GRANT EXECUTE ON FUNCTION agent_supervised.command(uuid,text,jsonb) TO supa_factory_runtime;").execute(admin.pool()).await.unwrap();
     s.verify_supervised_schema().await.unwrap();
     let a = supervised_app(s.clone());
@@ -391,6 +395,7 @@ pub async fn exercise() {
         0
     );
     sqlx::raw_sql("DROP TRIGGER fail_event ON agent_supervised.events;DROP FUNCTION agent_supervised.fail_event();").execute(admin.pool()).await.unwrap();
+    super::reasoning_tests::exercise(&a, &s, &admin).await;
     // Leave this running at step zero: restart must not auto-run or consume another step.
     if std::env::var("SUPA_FACTORY_BROWSER").as_deref() == Ok("1") {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:3352")
@@ -434,6 +439,7 @@ async fn command_status(a: &Router, t: &Value, op: &str, n: u128) -> u16 {
 pub async fn recovery() {
     let s = runtime_store().await;
     let a = supervised_app(s.clone());
+    super::reasoning_tests::recovery(&a, &s).await;
     let agents = http(&a, Some(OWNER), "GET", "/factory/agents", Value::Null)
         .await
         .1;
