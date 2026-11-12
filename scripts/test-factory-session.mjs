@@ -105,5 +105,30 @@ test('supervised adapter enforces feature, session, origin, exact command and ba
   assert.equal(calls,0);assert.equal((await supervisedRoute(make(),path)).status,502);assert.equal(calls,1);
   assert.equal(proxy(new NextRequest('http://127.0.0.1:3339'+path,{headers:{host:'127.0.0.1:3339',cookie:'supa_factory_session='+cookie}})).status,200);
   assert.equal(proxy(new NextRequest('http://127.0.0.1:3339'+path,{headers:{host:'127.0.0.1:3339'}})).status,401);
- }finally{delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
+ }finally{delete process.env.SUPA_SUPERVISED_REASONING_ENABLED;delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
+});
+
+test('reasoning adapter permits only exact bounded model plans and never caller-supplied inference receipts',async()=>{
+ process.env.SUPA_SUPERVISED_REASONING_ENABLED='true';
+ const {supervisedRoute}=await import(taskModuleUrl),id='11111111-1111-4111-8111-111111111111';
+ const cookie=session.issueFactorySession('synthetic',password),oldFetch=globalThis.fetch,oldUrl=process.env.SUPA_BACKEND_URL;
+ const plan={provider:'mock',model:'synthetic-incident-v1',max_input_tokens:2000,max_output_tokens:256,max_requests:1,max_cost_microusd:0,external_tools:[]};
+ const input={task:'Review synthetic incident',desired_outcome:'recovered',material:'Synthetic service recovered.',synthetic_only:true,retain_memory:false,reasoning:plan};
+ const row={id,agent_id:id,creator_id:id,request_id:id,input,input_sha256:'a'.repeat(64),state:'pending',revision:0,step:0,created_at:new Date().toISOString(),approved_until:null,started_at:null,deadline:null,finished_at:null,payloads:[],error_code:null,events:[],inference:null};
+ const path='/api/factory/agents/'+id+'/tasks',commandPath='/api/factory/tasks/'+id+'/command';let calls=0;
+ const make=(body,p=path)=>new Request('http://127.0.0.1:3339'+p,{method:'POST',headers:{host:'127.0.0.1:3339',origin:'http://127.0.0.1:3339','Content-Type':'application/json',cookie:'supa_factory_session='+cookie},body:JSON.stringify(body)});
+ try{
+  process.env.SUPA_SUPERVISED_TASKS_ENABLED='true';process.env.SUPA_BACKEND_URL='http://127.0.0.1:3351';globalThis.fetch=async()=>{calls++;return Response.json(row);};
+  for(const patch of [{provider:'live'},{model:'other'},{max_input_tokens:2001},{max_output_tokens:257},{max_requests:2},{max_cost_microusd:1},{external_tools:['web']}])assert.equal((await supervisedRoute(make({request_id:id,input:{...input,reasoning:{...plan,...patch}}}),path)).status,400);
+  for(const operation of ['reserve_inference','settle_inference'])assert.equal((await supervisedRoute(make({request_id:id,operation,expected_revision:0,input_sha256:'a'.repeat(64),confirmed:true},commandPath),commandPath)).status,400);
+  assert.equal((await supervisedRoute(make({request_id:id,input,payload:{invented:true}}),path)).status,400);assert.equal(calls,0);
+  process.env.SUPA_SUPERVISED_REASONING_ENABLED='false';assert.equal((await supervisedRoute(make({request_id:id,input}),path)).status,403);assert.equal(calls,0);process.env.SUPA_SUPERVISED_REASONING_ENABLED='true';
+  const response=await supervisedRoute(make({request_id:id,input}),path);assert.equal(response.status,200);assert.deepEqual((await response.json()).input.reasoning,plan);assert.equal(calls,1);
+  const real={...plan,provider:'openai',model:'gpt-6-luna',max_cost_microusd:378,real:{project:'proj_fixture',budget_id:id,expires_at:new Date(Date.now()+300000).toISOString()}};
+  for(const patch of [{max_cost_microusd:377},{model:'gpt-6-luna-latest'},{max_requests:2},{real:{...real.real,project:'untrusted'}}])assert.equal((await supervisedRoute(make({request_id:id,input:{...input,reasoning:{...real,...patch}}}),path)).status,400);
+  globalThis.fetch=async()=>Response.json({...row,input:{...input,reasoning:real}});
+  assert.equal((await supervisedRoute(make({request_id:id,input:{...input,reasoning:real}}),path)).status,200);
+  globalThis.fetch=async()=>Response.json({...row,inference:{private_unsupported_field:'must_not_escape'}});
+  const invalid=await supervisedRoute(make({request_id:id,input}),path);assert.equal(invalid.status,502);assert(!(await invalid.text()).includes('must_not_escape'));
+ }finally{delete process.env.SUPA_SUPERVISED_REASONING_ENABLED;delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
 });
