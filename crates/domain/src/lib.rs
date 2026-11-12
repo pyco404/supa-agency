@@ -1,10 +1,12 @@
 pub mod agent_identity;
-pub mod platform_token;
 pub mod ecosystem_social;
+pub mod platform_token;
 mod provider_diagnostics;
 pub use provider_diagnostics::*;
 mod live_work;
 pub use live_work::*;
+mod supervised_reasoning;
+pub use supervised_reasoning::*;
 mod work_review;
 pub use work_review::*;
 mod work_diagnostics;
