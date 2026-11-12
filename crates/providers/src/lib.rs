@@ -4,6 +4,8 @@ mod authentication;
 pub mod controlled;
 mod social;
 pub mod solana;
+pub mod supervised_mock;
+pub mod supervised_openai;
 pub mod vault;
 mod work;
 use async_trait::async_trait;
