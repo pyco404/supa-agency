@@ -64,3 +64,33 @@ Current reviewed reasoning SQL SHA-256: `5c76b1ebe1133d5efd92063887dc0044403709e
 the exact deterministic task response shape and exposes inference metadata only
 for reasoning tasks; a PostgreSQL regression checks this compatibility. The
 earlier checksum in the local preparation document is historical.
+
+## Private-staging startup admission
+
+The general provider remains `offline`. Setting `SUPA_ALLOW_OPENAI=true` alone
+still fails private-staging startup. The supervised exception requires both real
+provider flags, synthetic Factory and supervised tasks, an existing Owner
+credential whose session covers the approval window, and the exact server-side
+owner/task/budget/model/project/input-hash receipt. This startup path permits
+only the pinned 378-microUSD single-request evaluation and rejects expired,
+missing, inconsistent or uncleared authorization. It does not change production
+or epoch-mode admission, enable a scheduler or construct a provider client.
+
+Before the HTTP listener opens, the restricted runtime database role must verify
+the schema and read the exact owner's task through the existing command function.
+The task must be approved, at step zero, with matching input and real plan and no
+inference record. Startup makes no reservation, model request or task/audit write.
+Dispatch still independently verifies approval and spending consent and acquires
+the durable unique-budget reservation before any provider metadata or generation.
+
+If a process stops after reserving a request, do not restart with its paid scope
+enabled or replay the request. Clear the receipt and owner/task/budget bindings,
+set both paid flags false, and reload the same API image in restricted mode.
+The result or uncertain reservation and audit remain available for inspection;
+unknown cost keeps its full reservation. Stop preserves that history. The cleared
+Phase 4 authorization is never reused for a new test.
+
+`python3 scripts/validate-agent-factory.py --supervised` also runs the actual API
+process-start regression against its disposable PostgreSQL 18 fixture. Synthetic
+credentials, a provider connection trap, rejected configurations, private HTTP
+authentication and restricted restart recovery are required; no inference is sent.
