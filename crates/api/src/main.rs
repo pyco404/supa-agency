@@ -30,6 +30,25 @@ async fn run() -> Result<()> {
     if supervised_tasks && !synthetic_factory {
         return Err(Error::Denied);
     }
+    let bounded_autonomy = flag("SUPA_BOUNDED_AUTONOMY_ENABLED", false)?;
+    if bounded_autonomy
+        && (!private_staging
+            || !synthetic_factory
+            || !supervised_tasks
+            || flag("SUPA_ALLOW_OPENAI", false)?
+            || flag("SUPA_ALLOW_ANTHROPIC", false)?
+            || flag("SUPA_SUPERVISED_REAL_MODEL", false)?
+            || [
+                "SUPA_SUPERVISED_SPENDING_APPROVAL",
+                "SUPA_SUPERVISED_REAL_TASK_ID",
+                "SUPA_SUPERVISED_REAL_OWNER_ID",
+                "SUPA_SUPERVISED_REAL_BUDGET_ID",
+            ]
+            .iter()
+            .any(|k| std::env::var(k).is_ok_and(|v| !v.is_empty())))
+    {
+        return Err(Error::Denied);
+    }
     let agent_avatars = flag("SUPA_AGENT_AVATARS_ENABLED", false)?;
     if agent_avatars && !synthetic_factory {
         return Err(Error::Denied);
@@ -216,6 +235,10 @@ async fn run() -> Result<()> {
                 // restricted command function. No raw grants or recovery writes.
                 scope.verify_task(&state.store).await?;
             }
+        }
+        if bounded_autonomy {
+            state.store.verify_bounded_schema(false).await?;
+            state = state.with_bounded_autonomy()?;
         }
         let listener = tokio::net::TcpListener::bind(bind)
             .await
