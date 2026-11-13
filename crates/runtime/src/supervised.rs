@@ -128,7 +128,7 @@ impl Runtime {
         self.store.supervised(actor, &command.operation, body).await
     }
 }
-fn supervised_payload(task: &Value) -> Result<Value> {
+pub(crate) fn supervised_payload(task: &Value) -> Result<Value> {
     let start = Instant::now();
     let input: SupervisedInput =
         serde_json::from_value(task["input"].clone()).map_err(|_| Error::Invalid)?;
