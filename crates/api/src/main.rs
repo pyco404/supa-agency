@@ -52,12 +52,40 @@ async fn run() -> Result<()> {
             .map(|value| serde_json::from_str(&value).map_err(|_| Error::Invalid))
             .transpose()?
             .unwrap_or_default();
+    // Only the synthetic task adapter gets this exception. The generic reasoner
+    // stays Offline; every other staging restriction still runs below.
+    let supervised_admission = if private_staging {
+        supa_runtime::supervised_reasoning::SupervisedStartupAdmission::from_settings(|key| {
+            std::env::var(key).ok()
+        })?
+    } else {
+        None
+    };
+    if let Some(scope) = &supervised_admission {
+        if !synthetic_factory
+            || !supervised_tasks
+            || provider != "offline"
+            || flag("SUPA_CONTROLLED_WORK", false)?
+            || flag("SUPA_WORKER_ENABLED", false)?
+            || flag("SUPA_SOCIAL_REVIEW_ENABLED", false)?
+            || std::env::var_os("SUPA_WALLET_POLL_SECONDS").is_some()
+            || !credentials
+                .iter()
+                .any(|c| c.id == scope.owner() && c.role == supa_persistence::Role::Owner)
+            || !deadlines
+                .get(&scope.owner())
+                .is_some_and(|deadline| scope.session_covers_scope(*deadline))
+        {
+            return Err(Error::Denied);
+        }
+    }
     validate_staging(
         private_staging,
         &provider,
         &[
             scheduler_enabled,
-            flag("SUPA_ALLOW_OPENAI", false)? || flag("SUPA_ALLOW_ANTHROPIC", false)?,
+            (flag("SUPA_ALLOW_OPENAI", false)? && supervised_admission.is_none())
+                || flag("SUPA_ALLOW_ANTHROPIC", false)?,
             flag("SUPA_CONTROLLED_INFERENCE", false)?,
             flag("SUPA_WALLET_ENABLED", false)?,
             std::env::var("SUPA_OPERATOR_ID").is_ok(),
@@ -183,6 +211,11 @@ async fn run() -> Result<()> {
         if supervised_tasks {
             state.store.verify_supervised_schema().await?;
             state = state.with_supervised_tasks()?;
+            if let Some(scope) = supervised_admission {
+                // Existing ownership and consent checks are read through the
+                // restricted command function. No raw grants or recovery writes.
+                scope.verify_task(&state.store).await?;
+            }
         }
         let listener = tokio::net::TcpListener::bind(bind)
             .await
