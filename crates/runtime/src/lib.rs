@@ -1,3 +1,4 @@
+pub mod bounded;
 pub mod controlled;
 pub mod economy;
 pub mod evaluation;
