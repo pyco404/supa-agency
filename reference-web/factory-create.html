@@ -27,6 +27,19 @@ body{overflow:auto}.journey{max-width:74ch;margin:auto;padding:32px 24px 64px;li
 <p>Private synthetic input only, up to 4,000 UTF-8 bytes. Each task needs your approval. Start and Run next step are separate actions; nothing runs in the background. Three steps maximum and a 120-second execution window. Mock and extraction tasks cost $0; paid inference is disabled here and needs separate spending authorization in addition to task approval. Pause and Stop take effect between atomic steps.</p>
 <form id="task-form"><label for="task-kind">Task mode</label><select id="task-kind"><option value="extract">Evidence extraction</option><option value="reasoning">Incident reasoning / mock model</option></select><p>Mock reasoning exercises the model-provider workflow without calling a live AI service. One request maximum; no retries, tools or spending. Model interpretations remain uncertain until you review them.</p><label for="task-objective">Task</label><input id="task-objective" maxlength="600" required><label for="task-outcome">Desired evidence / exact phrase</label><input id="task-outcome" maxlength="120" required><p>The report checks literal presence of this phrase. It does not certify meaning or external truth.</p><label for="task-material">Synthetic material</label><textarea id="task-material" maxlength="4000" required></textarea><label><input id="task-synthetic" type="checkbox" required> This is disposable synthetic data, without secrets or real personal information.</label><label><input id="task-memory" type="checkbox"> Retain an evidence-linked private task memory / requires Retain lessons permission</label><button type="submit">Submit task for approval</button></form>
 <button id="refresh-tasks" type="button">Refresh tasks</button><p id="task-status" role="status" aria-live="polite"></p><div id="task-list"></div></section>
+<section id="bounded-autonomy" hidden aria-labelledby="bounded-heading"><h2 id="bounded-heading">Bounded goal execution</h2>
+<p>Approve a finite scope for this private synthetic agent. The deterministic evidence engine runs three internal steps per cycle, with no AI requests, external tools or spending. Proposed memories need your review.</p>
+<form id="bounded-form"><label for="bounded-goal">Goal from this agent’s configuration</label><select id="bounded-goal" required></select>
+<label for="bounded-outcome">Desired evidence / exact phrase</label><input id="bounded-outcome" maxlength="120" required>
+<label for="bounded-material">Approved synthetic material</label><textarea id="bounded-material" maxlength="4000" required></textarea>
+<label for="bounded-cycles">Maximum cycles / 1–10</label><input id="bounded-cycles" type="number" min="1" max="10" value="3" required>
+<label for="bounded-actions">Maximum internal actions / three per cycle, up to 30</label><input id="bounded-actions" type="number" min="3" max="30" value="9" required>
+<label for="bounded-interval">Minimum interval / seconds, 5–86,400</label><input id="bounded-interval" type="number" min="5" max="86400" value="15" required>
+<label for="bounded-duration">Authorization lifetime / seconds, 60–3,600</label><input id="bounded-duration" type="number" min="60" max="3600" value="300" required>
+<label for="bounded-priority">Scheduling priority / 0–5</label><input id="bounded-priority" type="number" min="0" max="5" value="0" required>
+<label><input id="bounded-synthetic" type="checkbox" required> This material is synthetic and contains no secrets or personal information.</label><p>Maximum spending: $0. Preparing a scope does not approve or start execution.</p><button type="submit">Prepare scope for review</button></form>
+<button id="bounded-refresh" type="button">Refresh schedule</button><p id="bounded-status" role="status" aria-live="polite">Loading saved scope…</p><div id="bounded-state"></div><div id="bounded-cycles-list"></div></section>
+
 </main>
 <script>
 (()=>{'use strict';
@@ -134,6 +147,74 @@ if(tasksEnabled&&profileId){
  catch(e){taskSubmissionPhase('unconfirmed');taskMessage(e.message+' Submission not confirmed here. Fields are locked; a deliberate retry sends the exact same task and submission ID. Check the task list first.');}finally{taskBusy=false;}
 
  });
+}
+
+$('refresh').addEventListener('click',()=>load().catch(e=>message(e.message)));
+$('signout').addEventListener('click',async()=>{try{await request('/api/factory/session','DELETE');location.assign('/sign-in');}catch(e){message(e.message);}});
+if(document.documentElement.dataset.boundedEnabled==='true'&&profileId){
+ const panel=$('bounded-autonomy'),form=$('bounded-form'),view=$('bounded-state'),cycles=$('bounded-cycles-list'),notice=$('bounded-status');
+ let saved=null,working=false,canRemember=false,readVersion=0,blocked=false;
+ panel.hidden=false;$('execution-boundary').textContent='Private synthetic agents can run separately approved deterministic tasks and finite goal schedules. Spending, paid inference, external actions and publishing remain disabled.';
+ const endpoint='/api/factory/agents/'+profileId+'/autonomy';
+ const say=text=>{notice.textContent=text;};
+ const lock=()=>{for(const b of panel.querySelectorAll('button'))b.disabled=true;$('bounded-refresh').disabled=false;};
+ function action(name,operation,run,extra={}){
+  const button=element('button',name);button.type='button';
+  const needsConsent=['approve','start','resume'].includes(operation);
+  if(needsConsent)button.disabled=true;
+  view.querySelector('#bounded-consent')?.addEventListener('change',e=>{if(needsConsent)button.disabled=!e.target.checked;});
+  button.addEventListener('click',()=>send({request_id:crypto.randomUUID(),operation,expected_revision:run.revision,scope_sha256:run.scope_sha256,confirmed:needsConsent||operation==='review',...extra}));return button;
+ }
+ async function send(body){
+  if(working||blocked)return;working=true;readVersion++;lock();panel.setAttribute('aria-busy','true');say('Saving the exact requested action…');
+  try{await request(endpoint,'POST',body);blocked=false;await refresh();say('Saved. State and evidence were read back from the database.');}
+  catch{blocked=true;lock();say('The action could not be confirmed. Refresh the schedule before another action. Nothing is retried automatically.');}
+  finally{working=false;panel.setAttribute('aria-busy','false');}
+ }
+ async function inspect(cycle,article,button){
+  button.disabled=true;const output=element('div','Loading saved evidence…');article.append(output);
+  try{const task=await request('/api/factory/tasks/'+cycle.task_id);output.replaceChildren();
+   const report=task.payloads.find(p=>p.action==='extract_evidence')?.report;
+   output.append(element('h4','Genuine deterministic result'),element('p','These are supplied-text observations, not independent verification of the incident cause.'));
+   for(const e of report?.evidence||[])output.append(element('p','Line '+e.line+': '+e.quote));
+   const details=document.createElement('details');details.append(element('summary','Result, progress assessment and task audit'),element('pre',JSON.stringify({payloads:task.payloads,events:task.events},null,2)));output.append(details);
+   if(cycle.state==='awaiting_review'){
+    output.append(element('p','Proposed private hypothesis: '+cycle.proposed_memory.lesson));
+    const label=element('label',''),remember=document.createElement('input');remember.type='checkbox';remember.disabled=!canRemember;label.append(remember,document.createTextNode(' Retain this hypothesis privately when accepting / requires Retain lessons permission'));output.append(label);
+    const accept=element('button','Accept reviewed cycle');accept.type='button';accept.addEventListener('click',()=>send({request_id:crypto.randomUUID(),operation:'review',expected_revision:saved.revision,scope_sha256:saved.scope_sha256,confirmed:true,task_id:cycle.task_id,result_sha256:cycle.result_sha256,accept:true,retain_memory:remember.checked}));
+    const reject=element('button','Reject cycle proposal');reject.type='button';reject.addEventListener('click',()=>send({request_id:crypto.randomUUID(),operation:'review',expected_revision:saved.revision,scope_sha256:saved.scope_sha256,confirmed:true,task_id:cycle.task_id,result_sha256:cycle.result_sha256,accept:false,retain_memory:false}));output.append(accept,reject);
+   }
+  }catch{output.textContent='Saved evidence is unavailable. Refresh the schedule; no review was submitted.';}
+ }
+ function render(run){
+  saved=run;view.replaceChildren();cycles.replaceChildren();form.hidden=!!run;
+  if(!run){say('Choose an existing goal and prepare its bounded scope.');return;}
+  say('Saved schedule loaded. Execution state: '+run.state+'.');
+  view.append(element('h3','Schedule / '+run.state),element('p',run.cycles_started+' of '+run.scope.max_cycles+' cycles started · '+run.actions_reserved+' of '+run.scope.max_actions+' actions reserved · $0 spent'),element('p','Authority expires: '+(run.approved_until||'not approved')+'. Resume does not extend it.'));
+  if(run.state==='active')view.append(element('p','Automatic refresh every five seconds while this page is visible and you are not reviewing a result. A saved active scope does not prove the coordinator is online.'));
+  const details=document.createElement('details');details.append(element('summary','Exact scope and authorization hash'),element('pre',JSON.stringify(run.scope,null,2)),element('pre','Scope SHA-256: '+run.scope_sha256));details.open=run.state==='pending';view.append(details);
+  if(['pending','approved','paused'].includes(run.state)){
+   const label=element('label',''),consent=document.createElement('input');consent.type='checkbox';consent.id='bounded-consent';label.append(consent,document.createTextNode(' I authorize the exact displayed synthetic scope, its limits and expiry, with $0 spending.'));view.append(label);
+  }
+  const allowed={pending:[['Approve exact scope','approve'],['Stop schedule','stop']],approved:[['Start bounded schedule','start'],['Stop schedule','stop']],active:[['Pause schedule','pause'],['Stop schedule','stop']],paused:[['Resume within original limits','resume'],['Stop schedule','stop']],quarantined:[['Stop quarantined schedule','stop']]};
+  for(const [name,op] of allowed[run.state]||[])view.append(action(name,op,run));
+  for(const cycle of run.cycles){const article=element('article','');article.append(element('h3','Cycle '+cycle.ordinal+' / '+cycle.state));if(cycle.approved_memory)article.append(element('h4','Approved private memory'),element('p','Hypothesis: '+cycle.approved_memory.lesson));
+   if(cycle.result_sha256){const button=element('button','Inspect cycle '+cycle.ordinal+' evidence');button.type='button';button.addEventListener('click',()=>inspect(cycle,article,button));article.append(button,element('pre','Result SHA-256: '+cycle.result_sha256));}cycles.append(article);}
+  const audit=document.createElement('details');audit.append(element('summary','Schedule audit history'),element('pre',JSON.stringify(run.events,null,2)));view.append(audit);
+ }
+ async function refresh(){const version=++readVersion;const data=await request(endpoint);if(version!==readVersion)return;
+  if(data.goals&&!saved){const select=$('bounded-goal'),old=select.value;select.replaceChildren();for(const goal of data.goals.filter(g=>!g.completed)){const option=element('option',goal.description);option.value=goal.id;select.append(option);}if([...select.options].some(o=>o.value===old))select.value=old;}
+  blocked=false;render(data.run);$('bounded-refresh').disabled=false;form.querySelector('button').disabled=false;
+ }
+ form.addEventListener('submit',e=>{e.preventDefault();if(working||blocked||!form.reportValidity())return;const n=id=>Number($(id).value),select=$('bounded-goal');
+  const scope={goal_id:select.value,priority:n('bounded-priority'),input:{task:select.selectedOptions[0]?.textContent,desired_outcome:$('bounded-outcome').value.trim(),material:$('bounded-material').value.trim(),synthetic_only:$('bounded-synthetic').checked,retain_memory:false},max_cycles:n('bounded-cycles'),max_actions:n('bounded-actions'),max_spending_microusd:0,interval_seconds:n('bounded-interval'),valid_for_seconds:n('bounded-duration'),mode:'deterministic'};
+  if(scope.max_actions<scope.max_cycles*3){say('Allow three internal actions for every approved cycle, or reduce the cycle limit.');return;}send({request_id:crypto.randomUUID(),scope});
+ });
+ $('bounded-refresh').addEventListener('click',()=>{if(!working)refresh().catch(()=>{blocked=true;lock();say('Schedule unavailable. Refresh when connectivity returns; no action was retried.');});});
+ request('/api/factory/agents/'+profileId).then(a=>{canRemember=a.configuration.requested_capabilities.includes('remember');}).catch(()=>{});
+ refresh().catch(()=>{blocked=true;lock();say('Schedule unavailable. Your agent remains unchanged. Refresh to inspect saved state.');});
+ const timer=setInterval(()=>{if(saved?.state==='active'&&!working&&!blocked&&!document.hidden&&!panel.contains(document.activeElement)&&!panel.querySelector('details[open]')&&!$('bounded-consent')?.checked)refresh().catch(()=>{blocked=true;lock();say('Automatic refresh stopped. Refresh the schedule to inspect its current state.');});},5000);
+ window.addEventListener('pagehide',()=>clearInterval(timer),{once:true});
 }
 
 $('refresh').addEventListener('click',()=>load().catch(e=>message(e.message)));
