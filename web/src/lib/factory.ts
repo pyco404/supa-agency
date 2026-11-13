@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedRoute } from "./bounded";
 import { supervisedRoute } from "./supervised";
 import { factoryAuthorization, factoryCookie, factoryEnabled, factorySameOrigin, issueFactorySession } from "./factory-session";
 import { localRequest, operatorToken } from "./auth";
@@ -23,6 +24,7 @@ async function bounded(request: Request | Response, maximum: number) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 export async function factoryRoute(request: Request, path: string): Promise<Response> {
+  if (/^\/api\/factory\/agents\/[0-9a-f-]{36}\/autonomy$/.test(path)) return boundedRoute(request,path);
   if (/^\/api\/factory\/(?:agents\/[0-9a-f-]{36}\/tasks|tasks\/)/.test(path)) return supervisedRoute(request,path);
   if (/^\/api\/factory\/avatar/.test(path)) return avatarRoute(request, path);
   if (!localRequest(request)) return fail("origin_not_permitted", 403);
