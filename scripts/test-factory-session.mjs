@@ -11,6 +11,10 @@ const taskSource=await readFile(new URL('../web/src/lib/supervised.ts',import.me
 const taskZod=new URL('../web/node_modules/zod/index.js',import.meta.url).href;
 const taskModuleUrl='data:text/javascript,'+encodeURIComponent(ts.transpileModule(taskSource.replace("'zod'",JSON.stringify(taskZod)).replace("'./factory-session'",JSON.stringify(moduleUrl)).replace("'./auth'",JSON.stringify(auth)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
 
+const boundedSource=await readFile(new URL('../web/src/lib/bounded.ts',import.meta.url),'utf8');
+const boundedModuleUrl='data:text/javascript,'+encodeURIComponent(ts.transpileModule(boundedSource.replace("'zod'",JSON.stringify(taskZod)).replace("'./factory-session'",JSON.stringify(moduleUrl)).replace("'./auth'",JSON.stringify(auth)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
+const {boundedRoute}=await import(boundedModuleUrl);
+
 const nextServer=new URL('../web/node_modules/next/server.js',import.meta.url).href;
 const {NextRequest}=await import(nextServer);
 const proxySource=await readFile(new URL('../web/src/proxy.ts',import.meta.url),'utf8');
@@ -70,7 +74,7 @@ test('avatar-free detail adapter forwards one validated ID and rejects writes or
  const stub='data:text/javascript,'+encodeURIComponent('export const avatarsEnabled=()=>false; export const avatarRoute=()=>{throw Error("unexpected_avatar_route")};');
  const src=await readFile(new URL('../web/src/lib/factory.ts',import.meta.url),'utf8');
  const zod=new URL('../web/node_modules/zod/index.js',import.meta.url).href;
- const {factoryRoute}=await import('data:text/javascript,'+encodeURIComponent(ts.transpileModule(src.replace('"./supervised"',JSON.stringify(taskModuleUrl)).replace('"zod"',JSON.stringify(zod)).replace('"./factory-session"',JSON.stringify(moduleUrl)).replace('"./auth"',JSON.stringify(auth)).replace('"./avatars"',JSON.stringify(stub)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText));
+ const {factoryRoute}=await import('data:text/javascript,'+encodeURIComponent(ts.transpileModule(src.replace('"./bounded"',JSON.stringify(boundedModuleUrl)).replace('"./supervised"',JSON.stringify(taskModuleUrl)).replace('"zod"',JSON.stringify(zod)).replace('"./factory-session"',JSON.stringify(moduleUrl)).replace('"./auth"',JSON.stringify(auth)).replace('"./avatars"',JSON.stringify(stub)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText));
  const id='11111111-1111-4111-8111-111111111111',path='/api/factory/agents/'+id;
  const configuration={request_id:id,name:'Synthetic assistant',description:'Disposable fixture',purpose:'Review synthetic reports',personality:{voice:'Curious',traits:[]},goals:['Review a synthetic report'],requested_capabilities:[],autonomy:'disabled',spending_limit_microusd:0,private_consent:true};
  const agent={agent_id:id,configuration,status:'paused',qualification:'pending_review',public:false,enabled_capabilities:[],execution_enabled:false,token_mint:null};
@@ -131,4 +135,29 @@ test('reasoning adapter permits only exact bounded model plans and never caller-
   globalThis.fetch=async()=>Response.json({...row,inference:{private_unsupported_field:'must_not_escape'}});
   const invalid=await supervisedRoute(make({request_id:id,input}),path);assert.equal(invalid.status,502);assert(!(await invalid.text()).includes('must_not_escape'));
  }finally{delete process.env.SUPA_SUPERVISED_REASONING_ENABLED;delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
+});
+
+test('bounded goal adapter preserves default deny, exact scopes, origin and zero spending',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',path='/api/factory/agents/'+id+'/autonomy';
+ const cookie=session.issueFactorySession('synthetic',password), originalFetch=globalThis.fetch;
+ const scope={goal_id:id,priority:0,input:{task:'Review synthetic notes',desired_outcome:'Synthetic',material:'Synthetic service recovered.',synthetic_only:true,retain_memory:false},max_cycles:3,max_actions:9,max_spending_microusd:0,interval_seconds:5,valid_for_seconds:300,mode:'deterministic'};
+ const make=(body,extra={})=>new Request('http://127.0.0.1:3339'+path,{method:body?'POST':'GET',headers:{host:'127.0.0.1:3339',origin:'http://127.0.0.1:3339','content-type':'application/json',cookie:`supa_factory_session=${cookie}`,...extra},body:body?JSON.stringify(body):undefined});
+ let calls=0;globalThis.fetch=async()=>{calls++;return Response.json({run:null,goals:[]});};
+ const oldFlag=process.env.SUPA_BOUNDED_AUTONOMY_ENABLED,oldBackend=process.env.SUPA_BACKEND_URL;
+ try{
+  process.env.SUPA_BACKEND_URL='http://127.0.0.1:3353';process.env.SUPA_BOUNDED_AUTONOMY_ENABLED='false';
+  assert.equal((await boundedRoute(make(),path)).status,403);
+  process.env.SUPA_BOUNDED_AUTONOMY_ENABLED='true';process.env.SUPA_SUPERVISED_TASKS_ENABLED='true';
+  assert.equal((await boundedRoute(make(null,{cookie:''}),path)).status,401);
+  for(const patch of [{max_spending_microusd:1},{max_actions:8},{max_cycles:11},{mode:'openai'},{input:{...scope.input,retain_memory:true}},{input:{...scope.input,reasoning:{provider:'openai'}}}])assert.equal((await boundedRoute(make({request_id:id,scope:{...scope,...patch}}),path)).status,400);
+  assert.equal((await boundedRoute(make({request_id:id,scope},{origin:'https://untrusted.invalid'}),path)).status,403);
+  assert.equal(calls,0);
+  const valid=await boundedRoute(make(),path);assert.equal(valid.status,200);assert.match(valid.headers.get('cache-control'),/no-store/);assert.equal(calls,1);
+  globalThis.fetch=async()=>{calls++;return Response.json({run:null,goals:[],lease_id:'must_not_escape'});};
+  const invalid=await boundedRoute(make(),path);assert.equal(invalid.status,502);assert(!(await invalid.text()).includes('must_not_escape'));
+  globalThis.fetch=async()=>{calls++;throw Error('synthetic_transport_failure');};
+  const before=calls;assert.equal((await boundedRoute(make(),path)).status,503);assert.equal(calls,before+1,'transport must not retry');
+  const req=new NextRequest('http://127.0.0.1:3339'+path,{headers:{host:'127.0.0.1:3339',cookie:`supa_factory_session=${cookie}`}});
+  assert.equal(proxy(req).status,200);
+ }finally{globalThis.fetch=originalFetch;if(oldFlag===undefined)delete process.env.SUPA_BOUNDED_AUTONOMY_ENABLED;else process.env.SUPA_BOUNDED_AUTONOMY_ENABLED=oldFlag;if(oldBackend===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldBackend;}
 });
