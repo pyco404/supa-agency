@@ -1,3 +1,4 @@
+mod bounded;
 mod access;
 mod avatars;
 pub use avatars::image_receipt_valid;
@@ -39,6 +40,7 @@ use uuid::Uuid;
 pub struct AppState {
     synthetic_factory_enabled: bool,
     supervised_tasks_enabled: bool,
+    bounded_autonomy_enabled: bool,
     agent_avatars_enabled: bool,
     pub live_work_enabled: bool,
     pub controlled: Option<supa_runtime::controlled::ControlledInference>,
@@ -64,6 +66,7 @@ impl AppState {
         Ok(Self {
             synthetic_factory_enabled: false,
             supervised_tasks_enabled: false,
+            bounded_autonomy_enabled: false,
             agent_avatars_enabled: false,
             controlled: None,
             live_work_enabled: false,
@@ -244,6 +247,7 @@ pub fn router(state: AppState) -> Router {
         .merge(access::routes())
         .merge(factory::routes())
         .merge(supervised::routes())
+        .merge(bounded::routes())
         .merge(avatars::routes())
         .route("/operator-status", get(operator_status::status))
         .merge(economy::routes())
