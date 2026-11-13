@@ -1,3 +1,5 @@
+mod bounded;
+pub use bounded::{BoundedCommand, BoundedCreate, BoundedScope};
 mod access;
 mod avatars;
 mod factory;
