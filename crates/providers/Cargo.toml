@@ -21,3 +21,7 @@ base64.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[features]
+# Only the separately named, non-deployable validation executable enables this.
+pilot-offline-tests = []
