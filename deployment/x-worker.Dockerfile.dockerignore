@@ -10,6 +10,7 @@
 !migrations/*.sql
 !deployment/
 !deployment/x-worker-entrypoint.py
+!deployment/x-pilot-entrypoint.py
 !deployment/x-worker-mock.mode
 !deployment/x-worker-live.mode
 !deployment/x-posting-foundation.sql
