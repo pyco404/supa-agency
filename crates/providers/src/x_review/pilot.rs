@@ -1,5 +1,7 @@
 //! Root-provisioned exact-text pilot permit. No creation, enrollment or scheduling.
-use super::{MockAccount, oauth1};
+use super::MockAccount;
+#[cfg(not(feature = "pilot-offline-tests"))]
+use super::oauth1;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -13,6 +15,9 @@ use supa_domain::{Error, Result};
 use uuid::Uuid;
 const ROOT: &str = "/etc/supa-agent/x-pilot";
 const OWNER: &str = "6fd863e1-745d-4a06-b68e-eea69e854a69";
+#[cfg(feature = "pilot-offline-tests")]
+#[path = "pilot_offline.rs"]
+mod offline;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Receipt {
@@ -227,7 +232,14 @@ impl PilotAuthorization {
         text: &str,
         guard: &dyn super::MockDispatchGuard,
     ) -> Result<super::XReceipt> {
-        oauth1::dispatch_pilot(self, text, guard).await
+        #[cfg(not(feature = "pilot-offline-tests"))]
+        {
+            oauth1::dispatch_pilot(self, text, guard).await
+        }
+        #[cfg(feature = "pilot-offline-tests")]
+        {
+            offline::dispatch(self, text, guard).await
+        }
     }
 }
 
