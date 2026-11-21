@@ -243,3 +243,34 @@ impl Store {
         Ok(())
     }
 }
+
+impl Store {
+    /// Dedicated manual pilot only. No approval creation or platform-store access.
+    pub async fn pilot_post_command(&self, actor: Uuid, op: &str, body: Value) -> Result<Value> {
+        if self.operational_context().is_some() || actor.is_nil() {
+            return Err(Error::Denied);
+        }
+        self.verify_first_post_local_database(false).await?;
+        let restricted:bool=sqlx::query_scalar("SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls) AND NOT has_table_privilege(current_user,'social_review.pilot_approvals','INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_table_privilege(current_user,'social_review.drafts','INSERT,UPDATE,DELETE,TRUNCATE') AND has_function_privilege(current_user,'social_review.pilot_post(uuid,text,jsonb)','EXECUTE') FROM pg_roles WHERE rolname=current_user").fetch_one(self.pool()).await.map_err(|_|Error::Denied)?;
+        if !restricted {
+            return Err(Error::Denied);
+        }
+        sqlx::query_scalar("SELECT social_review.pilot_post($1,$2,$3)")
+            .bind(actor)
+            .bind(op)
+            .bind(body)
+            .fetch_one(self.pool())
+            .await
+            .map_err(|_| Error::Denied)
+    }
+    pub async fn verify_pilot_cluster(&self, expected: &str) -> Result<()> {
+        let cluster: String = sqlx::query_scalar("SELECT social_review.pilot_cluster()")
+            .fetch_one(self.pool())
+            .await
+            .map_err(|_| Error::Denied)?;
+        if cluster != expected {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    }
+}
