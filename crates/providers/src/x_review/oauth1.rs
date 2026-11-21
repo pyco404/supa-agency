@@ -106,6 +106,7 @@ pub(super) async fn dispatch_hosted(
         post_url: POST_ENDPOINT.into(),
         session: None,
         live_authorization: Some(auth),
+        pilot_authorization: None,
         expires: post.expires_unix,
     };
     Ok(MockXAdapter::prepared_live(
@@ -346,6 +347,7 @@ struct PostingTransport<'a> {
     post_url: String,
     session: Option<&'a AuthorizationReceipt>,
     live_authorization: Option<&'a super::live::LiveAuthorization>,
+    pilot_authorization: Option<&'a super::pilot::PilotAuthorization>,
     expires: u64,
 }
 #[async_trait]
@@ -359,6 +361,9 @@ impl MockXTransport for PostingTransport<'_> {
         }
         if let Some(live) = self.live_authorization {
             live.check()?;
+        }
+        if let Some(pilot) = self.pilot_authorization {
+            pilot.check()?;
         }
         // A session observation cannot extend the post reservation deadline.
         if now()? >= self.expires {
@@ -498,6 +503,7 @@ async fn dispatch(
         post_url: POST_ENDPOINT.into(),
         session: Some(authorization),
         live_authorization: live,
+        pilot_authorization: None,
         expires: post.expires_unix,
     };
     let adapter = MockXAdapter::prepared_live(
@@ -544,6 +550,7 @@ pub(crate) async fn test_posting(client: reqwest::Client, origin: &str, allowed:
         post_url: format!("{origin}/2/tweets"),
         session: None,
         live_authorization: None,
+        pilot_authorization: None,
         expires: now().unwrap() + 60,
     };
     let text = "Supa Agent reporting for onboarding. Our official X account is connected and its identity verified. Autonomous posting is still off. Apparently even AI needs a permission slip.";
@@ -727,4 +734,44 @@ mod hosted_tests {
             assert!(service_credentials(&path).is_err());
         }
     }
+}
+
+/// Manual permit is separate from autonomous authority and local terminal consent.
+pub(super) async fn dispatch_pilot(
+    auth: &super::pilot::PilotAuthorization,
+    text: &str,
+    guard: &dyn MockDispatchGuard,
+) -> Result<XReceipt> {
+    auth.check()?;
+    let r = auth.receipt();
+    let post = ReservedPost {
+        account: r.account.clone(),
+        text,
+        text_sha256: &r.text_sha256,
+        expires_unix: r.expires_unix,
+        budget_microusd: r.budget_microusd,
+    };
+    authorize_reservation(&post, guard).await?;
+    auth.check()?;
+    let credentials = service_credentials(std::path::Path::new(HOSTED_CREDENTIAL))?;
+    auth.check()?;
+    let identity = IdentityClient::new()?;
+    let wire = PostingTransport {
+        client: identity.client,
+        credentials,
+        identity_url: identity.endpoint,
+        post_url: POST_ENDPOINT.into(),
+        session: None,
+        live_authorization: None,
+        pilot_authorization: Some(auth),
+        expires: r.expires_unix,
+    };
+    Ok(MockXAdapter::prepared_live(
+        wire,
+        Zeroizing::new(String::new()),
+        r.account.clone(),
+        r.expires_unix,
+    )?
+    .execute_reserved_once(text, &r.text_sha256, now()?, guard)
+    .await)
 }
