@@ -6,6 +6,7 @@ pub mod live_work;
 pub mod social_autonomy;
 pub mod supervised;
 pub mod wallet;
+pub mod x_pilot_draft;
 use std::{sync::Arc, time::Duration};
 use supa_capabilities::{REGISTRY, audit_name, authorize};
 use supa_domain::*;
