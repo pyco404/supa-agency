@@ -4,7 +4,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
-RUN CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 cargo build --release --locked -p supa-runtime --bin supa-x-autonomy --bin supa-x-mock-worker
+RUN CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 cargo build --release --locked -p supa-runtime --bin supa-x-autonomy --bin supa-x-mock-worker --bin supa-x-pilot
 
 # glibc-compatible runtime: no inherited Debian tools, gosu or Go runtime.
 # BusyBox /bin/sh is required by PostgreSQL initdb/pg_ctl; no Bash is installed.
@@ -32,6 +32,13 @@ STOPSIGNAL SIGTERM
 FROM base AS live
 COPY --from=build /app/target/release/supa-x-autonomy /opt/supa-x/bin/supa-x-autonomy
 COPY deployment/x-worker-live.mode /opt/supa-x/bundle-mode
+
+# Explicit manual target. Contains neither scheduler nor mock dispatcher.
+FROM base AS pilot
+COPY --from=build /app/target/release/supa-x-pilot /opt/supa-x/bin/supa-x-pilot
+COPY deployment/x-worker-live.mode /opt/supa-x/bundle-mode
+COPY deployment/x-pilot-entrypoint.py /opt/supa-x/pilot-entrypoint.py
+ENTRYPOINT ["/usr/bin/tini", "--", "python3", "/opt/supa-x/pilot-entrypoint.py"]
 
 # Default/rehearsal target has no live dispatcher or real account authorization.
 FROM base AS mock
