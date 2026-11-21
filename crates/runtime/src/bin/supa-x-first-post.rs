@@ -18,6 +18,57 @@ use uuid::Uuid;
 const OWNER: &str = "6fd863e1-745d-4a06-b68e-eea69e854a69";
 const TEXT: &str = "Supa Agent reporting for onboarding. Our official X account is connected and its identity verified. Autonomous posting is still off. Apparently even AI needs a permission slip.";
 const HASH: &str = "e8bc2bee94696da203aad809d8a80aeb05a4677960ef34d9b0b68b82d47f2dd7";
+// Draft preparation is offline. A matching hash is content identification, not
+// owner authorization, a spending grant, or permission to use hosted credentials.
+struct ExactDraft {
+    text: String,
+    text_sha256: String,
+    account: MockAccount,
+}
+fn validate_draft(raw: &[u8], expected_hash: &str, account: &MockAccount) -> Result<ExactDraft> {
+    let value: Value = serde_json::from_slice(raw).map_err(|_| Error::Denied)?;
+    let fields = value.as_object().ok_or(Error::Denied)?;
+    if fields.len() != 4
+        || !["version", "text", "text_sha256", "account"]
+            .iter()
+            .all(|key| fields.contains_key(*key))
+        || value["version"].as_u64() != Some(1)
+    {
+        return Err(Error::Denied);
+    }
+    let draft = ExactDraft {
+        text: value["text"].as_str().ok_or(Error::Denied)?.to_owned(),
+        text_sha256: value["text_sha256"]
+            .as_str()
+            .ok_or(Error::Denied)?
+            .to_owned(),
+        account: serde_json::from_value(value["account"].clone()).map_err(|_| Error::Denied)?,
+    };
+    let normalize = |text: &str| {
+        text.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
+    if draft.account.id != account.id
+        || draft.account.username != account.username
+        || draft.account.mode != account.mode
+        || draft.account.mode != "live"
+        || draft.text.trim() != draft.text
+        || expected_hash.len() != 64
+        || !expected_hash
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        || draft.text_sha256 != expected_hash
+        || x_review::text_sha256(&draft.text) != expected_hash
+        || expected_hash == HASH
+        || normalize(&draft.text) == normalize(TEXT)
+    {
+        return Err(Error::Denied);
+    }
+    supa_domain::social_review::safe_post(&draft.text)?;
+    Ok(draft)
+}
 fn now() -> Result<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -207,11 +258,34 @@ fn save_receipt(id: Uuid, approval: &Value, receipt: &XReceipt) -> Result<PathBu
 }
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() || args == ["prepare"] {
-        let (_, proof) = identity(false)?;
+    if args.first().is_some_and(|arg| arg == "post") {
+        // Historical one-post command is tied to a tweet already published.
+        // Never silently fall back to it while preparing a hosted pilot.
+        return Err(Error::Denied);
+    }
+    if args.first().is_some_and(|arg| arg == "prepare-draft") {
+        if args.len() != 3 {
+            return Err(Error::Denied);
+        }
+        let (account, proof) = identity(false)?;
+        let draft = validate_draft(&private_read(Path::new(&args[1]))?, &args[2], &account)?;
         println!(
             "{}",
-            json!({"prepared":true,"text":TEXT,"text_sha256":HASH,"identity_receipt_sha256":proof,"numeric_account_id":"verified privately","budget_microusd":25000,"ledger_status":"not connected; separately approved local ledger setup required","permissions":"owner console confirmation required","credits":"owner console confirmation required","publishing_enabled":false,"external_requests":0})
+            json!({"prepared":true,"text":draft.text,
+            "text_sha256":draft.text_sha256,"account":draft.account,
+            "identity_receipt_sha256":proof,"maximum_identity_lookups":1,
+            "maximum_posts":1,"budget_microusd":25000,"maximum_approval_seconds":600,
+            "authorization_required":true,"hosted_dispatch_available":false,
+            "publishing_enabled":false,"external_requests":0,"automatic_retry":false})
+        );
+        return Ok(());
+    }
+    if args.is_empty() || args == ["prepare"] {
+        println!(
+            "{}",
+            json!({"prepared":false,"reason":"historical_tweet_retired_exact_draft_required",
+                "next":"prepare-draft <private-json-path> <independently-reviewed-sha256>",
+                "publishing_enabled":false,"external_requests":0})
         );
         return Ok(());
     }
@@ -254,15 +328,6 @@ async fn run() -> Result<()> {
             args[2].parse().map_err(|_| Error::Denied)?,
             args[3].parse::<u64>().map_err(|_| Error::Denied)?,
             args[1].as_str(),
-        )
-    } else if args.len() == 4
-        && args[0] == "post"
-        && args[3] == "--authorize-one-get-and-one-post-budget-025"
-    {
-        (
-            args[1].parse().map_err(|_| Error::Denied)?,
-            args[2].parse::<u64>().map_err(|_| Error::Denied)?,
-            "live",
         )
     } else {
         return Err(Error::Denied);
@@ -434,5 +499,90 @@ async fn main() {
             "STOPPED: first-post operation unconfirmed; no automatic retry. Preserve the durable reservation and review/recover it before any further attempt."
         );
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod exact_draft_tests {
+    use super::*;
+    fn account() -> MockAccount {
+        MockAccount {
+            id: "123".into(),
+            username: "supa_agency".into(),
+            mode: "live".into(),
+        }
+    }
+    fn raw(text: &str) -> (Value, String) {
+        let hash = x_review::text_sha256(text);
+        (
+            json!({"version":1,"text":text,"text_sha256":hash,"account":account()}),
+            hash,
+        )
+    }
+    fn validate(value: &Value, hash: &str) -> bool {
+        validate_draft(&serde_json::to_vec(value).unwrap(), hash, &account()).is_ok()
+    }
+    #[test]
+    fn exact_fresh_draft_preserves_bytes_without_authorizing() {
+        let (v, h) = raw("Synthetic fixture completed three bounded cycles and stopped.");
+        let d = validate_draft(&serde_json::to_vec(&v).unwrap(), &h, &account()).unwrap();
+        assert_eq!(d.text, v["text"]);
+        assert_eq!(d.text_sha256, h);
+    }
+    #[test]
+    fn rejects_historical_tweet_and_normalized_variants() {
+        for text in [
+            TEXT.to_owned(),
+            TEXT.to_uppercase(),
+            TEXT.replace(" ", "  "),
+        ] {
+            let (v, h) = raw(&text);
+            assert!(!validate(&v, &h));
+        }
+    }
+    #[test]
+    fn rejects_changed_content_or_independent_hash() {
+        let (mut v, h) = raw("Synthetic fixture is complete.");
+        assert!(!validate(&v, &"0".repeat(64)));
+        v["text"] = json!("Synthetic fixture is different.");
+        assert!(!validate(&v, &h));
+    }
+    #[test]
+    fn rejects_account_or_mode_substitution() {
+        for (field, bad) in [("id", "456"), ("username", "other"), ("mode", "mock")] {
+            let (mut v, h) = raw("Synthetic fixture is complete.");
+            v["account"][field] = json!(bad);
+            assert!(!validate(&v, &h));
+        }
+    }
+    #[test]
+    fn rejects_missing_unknown_and_malformed_fields() {
+        let (mut v, h) = raw("Synthetic fixture is complete.");
+        v["approved"] = json!(true);
+        assert!(!validate(&v, &h));
+        v.as_object_mut().unwrap().remove("approved");
+        v.as_object_mut().unwrap().remove("text_sha256");
+        assert!(!validate(&v, &h));
+        assert!(validate_draft(b"{", &h, &account()).is_err());
+    }
+    #[test]
+    fn retains_text_only_and_security_policy() {
+        for text in [
+            "",
+            " New draft ",
+            "Visit example.com",
+            "Hello @other",
+            "https://example.com",
+        ] {
+            let (v, h) = raw(text);
+            assert!(!validate(&v, &h));
+        }
+    }
+    #[test]
+    fn rejects_noncanonical_hash_and_schema_version() {
+        let (mut v, h) = raw("Synthetic fixture is complete.");
+        assert!(!validate(&v, &h.to_uppercase()));
+        v["version"] = json!(2);
+        assert!(!validate(&v, &h));
     }
 }
