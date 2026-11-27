@@ -6,12 +6,27 @@ arguments=("$@")
 command_index=0
 if [[ ${arguments[0]:-} == --literal-pathspecs ]]; then command_index=1; fi
 command_name=${arguments[$command_index]:-}
-if [[ $command_name == push ]]; then
-    if [[ $command_index != 0 || $# != 4 || ${2:-} != --no-follow-tags || ${3:-} != origin || ${4:-} != refs/heads/main:refs/heads/main ]]; then
-        printf '%s\n' 'Push requires the exact approved main-only command, without force or tags.' >&2
+if [[ $command_name == create-beta-checkout ]]; then
+    if [[ $command_index != 0 || $# != 2 ]]; then
+        printf '%s\n' 'Use create-beta-checkout with the exact approved absolute destination.' >&2
         exit 1
     fi
-    python3 "$project_root/scripts/git-policy.py" push-check
+    exec python3 "$project_root/scripts/create-beta-checkout.py" "${2}"
+fi
+if [[ $project_root == /home/pikoo/Desktop/supa-agent/artifacts/phase8-product-release-20261127/application-release && $command_name == push ]]; then
+    if [[ $# != 4 || $1 != push || $2 != --no-follow-tags || $3 != origin || $4 != refs/heads/release/product-staging-20261127:refs/heads/release/product-staging-20261127 ]]; then
+        printf '%s\n' 'Product release permits only its exact new-branch push.' >&2
+        exit 1
+    fi
+    python3 "$project_root/scripts/git-policy.py" push-check "$4"
+    exec git --git-dir="$project_root/.git-recovery" --work-tree="$project_root" "$@"
+fi
+if [[ $command_name == push ]]; then
+    if [[ $command_index != 0 || $# != 4 || ${2:-} != --no-follow-tags || ${3:-} != origin || ( ${4:-} != refs/heads/main:refs/heads/main && ${4:-} != refs/heads/release/x-pilot-validation-20261121:refs/heads/release/x-pilot-validation-20261121 ) ]]; then
+        printf '%s\n' 'Push requires an exact approved main or allowlisted release command, without force or tags.' >&2
+        exit 1
+    fi
+    python3 "$project_root/scripts/git-policy.py" push-check "${4}"
 fi
 for argument in "$@"; do
     if [[ $argument == --squash || $argument == --autosquash || $argument == --amend ]]; then
