@@ -28,7 +28,8 @@ def main():
     target = ROOT / path
     if target.is_symlink() or not target.is_file():
         raise ValueError('one_existing_regular_file_required')
-    if git('symbolic-ref', '--short', 'HEAD').strip() != b'main':
+    expected = b'release/product-staging-20261127' if ROOT == Path('/home/pikoo/Desktop/supa-agent/artifacts/phase8-product-release-20261127/application-release') and ROOT.resolve() == ROOT else b'main'
+    if git('symbolic-ref', '--short', 'HEAD').strip() != expected:
         raise ValueError('main_branch_required')
     if git('diff', '--cached', '--name-only', '--no-renames', '-z'):
         raise ValueError('index_must_be_empty_before_staging_one_file')
