@@ -57,7 +57,9 @@ impl Runtime {
                     let provider =
                         supa_providers::supervised_openai::SupervisedOpenAi::from_env(&plan)?;
                     return self
-                        .supervised_reasoning_with_provider(actor, task, command, &provider)
+                        .supervised_consented_reasoning_with_provider(
+                            actor, task, command, &provider,
+                        )
                         .await;
                 }
                 return self
