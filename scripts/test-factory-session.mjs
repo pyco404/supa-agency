@@ -16,7 +16,7 @@ const {NextRequest}=await import(nextServer);
 const proxySource=await readFile(new URL('../web/src/proxy.ts',import.meta.url),'utf8');
 const {proxy}=await import('data:text/javascript,'+encodeURIComponent(ts.transpileModule(proxySource.replace('"next/server"',JSON.stringify(nextServer)).replace('"./lib/auth"',JSON.stringify(auth)).replace('"./lib/factory-session"',JSON.stringify(moduleUrl)),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText));
 const password=randomBytes(32).toString('hex'),api_token=randomBytes(32).toString('hex');
-Object.assign(process.env,{SUPA_SITE_MODE:'staging',SUPA_SYNTHETIC_FACTORY_ENABLED:'true',SUPA_SITE_ORIGIN:'http://127.0.0.1:3339',SUPA_PUBLIC_LANDING_ENABLED:'true',SUPA_WEB_OPERATORS:JSON.stringify([{username:'synthetic',password,api_token}])});
+Object.assign(process.env,{SUPA_SUPERVISED_REASONING_ENABLED:'true',SUPA_SITE_MODE:'staging',SUPA_SYNTHETIC_FACTORY_ENABLED:'true',SUPA_SITE_ORIGIN:'http://127.0.0.1:3339',SUPA_PUBLIC_LANDING_ENABLED:'true',SUPA_WEB_OPERATORS:JSON.stringify([{username:'synthetic',password,api_token}])});
 const now=1000000;
 function req(value,headers={}){return new Request('http://127.0.0.1:3339/api/factory/agents',{headers:{cookie:`supa_factory_session=${value}`,...headers}});}
 test('signed bounded session does not contain account credentials and expires exclusively',()=>{
@@ -105,11 +105,10 @@ test('supervised adapter enforces feature, session, origin, exact command and ba
   assert.equal(calls,0);assert.equal((await supervisedRoute(make(),path)).status,502);assert.equal(calls,1);
   assert.equal(proxy(new NextRequest('http://127.0.0.1:3339'+path,{headers:{host:'127.0.0.1:3339',cookie:'supa_factory_session='+cookie}})).status,200);
   assert.equal(proxy(new NextRequest('http://127.0.0.1:3339'+path,{headers:{host:'127.0.0.1:3339'}})).status,401);
- }finally{delete process.env.SUPA_SUPERVISED_REASONING_ENABLED;delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
+ }finally{delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
 });
 
 test('reasoning adapter permits only exact bounded model plans and never caller-supplied inference receipts',async()=>{
- process.env.SUPA_SUPERVISED_REASONING_ENABLED='true';
  const {supervisedRoute}=await import(taskModuleUrl),id='11111111-1111-4111-8111-111111111111';
  const cookie=session.issueFactorySession('synthetic',password),oldFetch=globalThis.fetch,oldUrl=process.env.SUPA_BACKEND_URL;
  const plan={provider:'mock',model:'synthetic-incident-v1',max_input_tokens:2000,max_output_tokens:256,max_requests:1,max_cost_microusd:0,external_tools:[]};
@@ -130,5 +129,26 @@ test('reasoning adapter permits only exact bounded model plans and never caller-
   assert.equal((await supervisedRoute(make({request_id:id,input:{...input,reasoning:real}}),path)).status,200);
   globalThis.fetch=async()=>Response.json({...row,inference:{private_unsupported_field:'must_not_escape'}});
   const invalid=await supervisedRoute(make({request_id:id,input}),path);assert.equal(invalid.status,502);assert(!(await invalid.text()).includes('must_not_escape'));
- }finally{delete process.env.SUPA_SUPERVISED_REASONING_ENABLED;delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
+ }finally{delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;}
+});
+
+test('spending consent adapter requires separate confirmation and never forwards or exposes receipts',async()=>{
+ const {supervisedRoute}=await import(taskModuleUrl),id='11111111-1111-4111-8111-111111111111',path='/api/factory/tasks/'+id+'/spending-consent';
+ const cookie=session.issueFactorySession('synthetic',password),oldFetch=globalThis.fetch,oldUrl=process.env.SUPA_BACKEND_URL,oldFlag=process.env.SUPA_SUPERVISED_TASKS_ENABLED;
+ const body={request_id:id,expected_revision:1,input_sha256:'a'.repeat(64),confirmed:true,revoke:false};
+ const make=(data=body,auth=true,origin='http://127.0.0.1:3339',method='POST')=>new Request('http://127.0.0.1:3339'+path,{method,headers:{host:'127.0.0.1:3339',origin,'content-type':'application/json',...(auth?{cookie:'supa_factory_session='+cookie}:{})},body:method==='POST'?JSON.stringify(data):undefined});
+ let calls=0;const status={consent:{id,task_id:id,state:'authorized',expires_at:new Date(Date.now()+300000).toISOString(),max_cost_microusd:378}};
+ process.env.SUPA_BACKEND_URL='http://127.0.0.1:3351';process.env.SUPA_SUPERVISED_TASKS_ENABLED='true';
+ try{
+  globalThis.fetch=async(url,options)=>{calls++;assert.equal(new URL(url).pathname,path.slice(4));if(options.method==='POST')assert.deepEqual(JSON.parse(options.body),body);return Response.json(status);};
+  assert.equal((await supervisedRoute(make(body,false),path)).status,401);
+  assert.equal((await supervisedRoute(make(body,true,'https://untrusted.invalid'),path)).status,403);
+  for(const extra of [{confirmed:false},{receipt:{private_receipt:true}},{project:'proj_other'},{model:'other'},{max_cost_microusd:379},{owner_id:id}])assert.equal((await supervisedRoute(make({...body,...extra}),path)).status,400);
+  assert.equal(calls,0);assert.deepEqual(await(await supervisedRoute(make(),path)).json(),status);assert.equal(calls,1);
+  assert.deepEqual(await(await supervisedRoute(make(body,true,undefined,'GET'),path)).json(),status);
+  assert.equal(proxy(new NextRequest('http://127.0.0.1:3339'+path,{headers:{host:'127.0.0.1:3339',cookie:'supa_factory_session='+cookie}})).status,200);
+  globalThis.fetch=async()=>Response.json({...status,receipt:'private_receipt'});
+  const unsafe=await supervisedRoute(make(),path);assert.equal(unsafe.status,502);assert(!(await unsafe.text()).includes('private_receipt'));
+  process.env.SUPA_SUPERVISED_TASKS_ENABLED='false';assert.equal((await supervisedRoute(make(),path)).status,403);
+ }finally{globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPA_BACKEND_URL;else process.env.SUPA_BACKEND_URL=oldUrl;if(oldFlag===undefined)delete process.env.SUPA_SUPERVISED_TASKS_ENABLED;else process.env.SUPA_SUPERVISED_TASKS_ENABLED=oldFlag;}
 });
