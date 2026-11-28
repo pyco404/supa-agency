@@ -39,6 +39,8 @@ use uuid::Uuid;
 pub struct AppState {
     synthetic_factory_enabled: bool,
     supervised_tasks_enabled: bool,
+    supervised_spending_scope:
+        Option<Arc<supa_runtime::supervised_reasoning::SupervisedStartupAdmission>>,
     agent_avatars_enabled: bool,
     pub live_work_enabled: bool,
     pub controlled: Option<supa_runtime::controlled::ControlledInference>,
@@ -64,6 +66,7 @@ impl AppState {
         Ok(Self {
             synthetic_factory_enabled: false,
             supervised_tasks_enabled: false,
+            supervised_spending_scope: None,
             agent_avatars_enabled: false,
             controlled: None,
             live_work_enabled: false,
