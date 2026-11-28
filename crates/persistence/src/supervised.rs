@@ -124,6 +124,47 @@ impl Store {
         tx.commit().await.map_err(db)?;
         Ok(value)
     }
+    pub async fn verify_supervised_spending_schema(&self) -> Result<()> {
+        self.verify_supervised_schema().await?;
+        let valid: bool = sqlx::query_scalar("SELECT to_regprocedure('agent_supervised.spending(uuid,text,jsonb)') IS NOT NULL AND has_function_privilege(current_user,'agent_supervised.spending(uuid,text,jsonb)','EXECUTE')")
+            .fetch_one(self.pool()).await.map_err(db)?;
+        if !valid {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    }
+    /// Only trusted server code calls this function; HTTP never accepts its receipt/operation body.
+    /// A denied decision is committed before returning an error, preserving its audit entry.
+    pub async fn supervised_spending(
+        &self,
+        actor: Uuid,
+        operation: &str,
+        body: Value,
+    ) -> Result<Value> {
+        if self.operational.is_some() || actor.is_nil() {
+            return Err(Error::Denied);
+        }
+        let mut tx = self.pool.begin().await.map_err(db)?;
+        sqlx::query(
+            "SELECT set_config('statement_timeout','2s',true),set_config('lock_timeout','1s',true)",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+        let value: Value = sqlx::query_scalar("SELECT agent_supervised.spending($1,$2,$3)")
+            .bind(actor)
+            .bind(operation)
+            .bind(body)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db)?;
+        tx.commit().await.map_err(db)?;
+        if value["denied"] == true {
+            return Err(Error::Denied);
+        }
+        Ok(value)
+    }
+
     pub async fn supervised_create(
         &self,
         actor: Uuid,
