@@ -1,0 +1,101 @@
+/** Actual web handlers, actual API, synthetic PG; production provider disabled. */
+import {createServer} from 'node:http';
+import {randomBytes,randomUUID} from 'node:crypto';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import assert from 'node:assert/strict';
+import {chromium} from '../web/node_modules/@playwright/test/index.mjs';
+import {serverModules} from './server-test-modules.mjs';
+const root=process.cwd(),out=resolve(root,'artifacts/phase8-durable-spending-20261127/browser');
+const backend=new URL(process.env.SUPA_BACKEND_URL);assert.equal(backend.hostname,'127.0.0.1');assert.equal(backend.protocol,'http:');
+const nonce=process.env.SUPA_OFFLINE_BROWSER_NONCE;assert.match(nonce,/^[0-9a-f-]{36}$/);await mkdir(out,{recursive:true,mode:0o700});
+const password=randomBytes(32).toString('hex');
+Object.assign(process.env,{SUPA_SITE_MODE:'staging',SUPA_SYNTHETIC_FACTORY_ENABLED:'true',SUPA_SUPERVISED_TASKS_ENABLED:'true',SUPA_SUPERVISED_REASONING_ENABLED:'true',SUPA_INVITE_BETA_ENABLED:'false',SUPA_BOUNDED_AUTONOMY_ENABLED:'false',SUPA_SOCIAL_REVIEW_ENABLED:'false',SUPA_WEB_OPERATORS:JSON.stringify([{username:'owner',password,api_token:'factory-synthetic-owner-credential-00000000'},{username:'other',password,api_token:'factory-synthetic-other-credential-00000000'}])});
+const modules=await serverModules();const route=await modules.load('web/src/app/experience/[[...path]]/route.ts');const {proxy}=await modules.load('web/src/proxy.ts');const {NextRequest}=await import('../web/node_modules/next/server.js');
+let browser,stage='server',serverError=false;
+const report={passed:false,contexts:[],external_requests:0,actual_provider_requests:0,synthetic_receipts:true};
+const server=createServer(async(req,res)=>{try{
+ const url=new URL(req.url,process.env.SUPA_SITE_ORIGIN),chunks=[];let size=0;
+ for await(const chunk of req){size+=chunk.length;if(size>16000){res.writeHead(413).end();return;}chunks.push(chunk);}
+ const request=new Request(url,{method:req.method,headers:req.headers,body:['GET','HEAD'].includes(req.method)?undefined:Buffer.concat(chunks)});
+ const decision=proxy(new NextRequest(request.clone()));
+ const response=decision.headers.get('x-middleware-next')!=='1'?decision:route[req.method]?await route[req.method](request,{params:Promise.resolve({path:url.pathname.split('/').filter(Boolean)})}):new Response(null,{status:405});
+ res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));
+}catch{serverError=true;res.writeHead(500).end('Synthetic fixture error');}});
+try{
+ await new Promise((ok,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',ok);});const origin='http://localhost:'+server.address().port;process.env.SUPA_SITE_ORIGIN=origin;process.chdir(resolve(root,'web'));
+ browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true});
+ for(const [label,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]]){
+  stage=label+'_login';const context=await browser.newContext({viewport,serviceWorkers:'block',reducedMotion:'reduce'});
+  await context.route('**/*',r=>{if(new URL(r.request().url()).origin!==origin){report.external_requests++;return r.abort();}return r.continue();});
+  const page=await context.newPage();page.setDefaultTimeout(12000);
+  assert.equal((await page.goto(origin+'/sign-in',{waitUntil:'domcontentloaded'})).status(),200);
+  await page.getByLabel('Synthetic account').fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign In',exact:true}).click();await page.waitForURL(origin+'/factory/create');
+  stage=label+'_receipts';const agents=await(await context.request.get(origin+'/api/factory/agents')).json();const original=agents.agents.find(a=>a.configuration.request_id==='11111111-1111-4111-8000-000000000fa0');assert(original);
+  await page.goto(origin+'/my-agents/'+original.agent_id,{waitUntil:'domcontentloaded'});
+  const completed=page.locator('#task-list article').filter({has:page.getByText('Status: completed',{exact:false})});
+  await completed.getByRole('heading',{name:'Bounded reasoning plan / real AI model',exact:true}).waitFor();
+  const text=await completed.innerText();for(const s of ['gpt-6-luna','$0.000378','$0.000080 observed cost','Received a real AI proposal'])assert(text.includes(s));
+  assert((await page.locator('#task-list').innerText()).includes('cost unknown; full reservation held'));
+  const rows=(await(await context.request.get(origin+'/api/factory/agents/'+original.agent_id+'/tasks')).json()).tasks;
+  const saved=rows.find(t=>t.state==='completed'&&t.input.reasoning?.real);assert(saved);assert.equal(saved.payloads[2].memory.kind,'hypothesis');assert.equal(saved.payloads[2].memory.source_result_sha256,saved.inference.result_sha256);
+  stage=label+'_new_agent';
+  const config={request_id:randomUUID(),name:'Phase8 offline '+label+' '+nonce,description:'Disposable mock-backed real-plan acceptance',purpose:'Review synthetic incident notes',personality:{voice:'Cautious and concise',traits:['careful']},goals:['Review synthetic incident notes'],requested_capabilities:['read_memory','remember','evaluate_goal'],autonomy:'disabled',spending_limit_microusd:0,private_consent:true};
+  const created=await context.request.post(origin+'/api/factory/agents',{headers:{Origin:origin},data:config});assert.equal(created.status(),200,'unique fixture agent creation');const agent=await created.json();assert.notEqual(agent.agent_id,original.agent_id);
+  const clean=await context.request.get(origin+'/api/factory/agents/'+agent.agent_id+'/tasks');assert.equal(clean.status(),200);assert.deepEqual((await clean.json()).tasks,[],'new agent must have no tasks');
+  await page.goto(origin+'/my-agents/'+agent.agent_id,{waitUntil:'domcontentloaded'});
+  stage=label+'_prepare';
+  assert.equal(await page.locator('#task-kind').inputValue(),'extract','offline mode is the default');
+  assert.equal(await page.locator('#task-real-scope').isVisible(),false);
+  const form=page.locator('#task-form');assert.equal(await form.count(),1);
+  const outcome=form.getByLabel('Desired evidence / exact phrase',{exact:true});
+  assert.equal(await page.getByLabel('Desired evidence / exact phrase',{exact:true}).count(),1,'excluded autonomy form must not be present');
+  assert.equal(await outcome.count(),1,'task form locator must be unambiguous');assert.equal(await outcome.getAttribute('id'),'task-outcome');
+  await form.getByLabel('Task mode',{exact:true}).selectOption('real');
+  await form.getByLabel('OpenAI project ID / non-secret identifier',{exact:true}).fill('proj_offline_browser');
+  await form.getByLabel('Task',{exact:true}).fill('Phase8 offline '+nonce+' '+label);
+  await outcome.fill('recovered');
+  await form.getByLabel('Synthetic material',{exact:true}).fill('Synthetic service recovered after a test restart. Cause remains unverified.');
+  await form.getByLabel('This is disposable synthetic data, without secrets or real personal information.',{exact:true}).check();
+  await form.getByLabel('Retain an evidence-linked private task memory',{exact:false}).check();
+  const creation=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/factory/agents/'+agent.agent_id+'/tasks'&&r.request().method()==='POST');
+  await form.getByRole('button',{name:'Submit task for approval',exact:true}).click();
+  const response=await creation;assert.equal(response.status(),200,'create bounded real plan through website');const task=await response.json();const input=task.input;assert.match(task.input_sha256,/^[0-9a-f]{64}$/);
+  assert.equal(task.state,'pending');assert.equal(task.inference,null);assert.equal(task.approved_until,null);
+  assert.equal(input.reasoning.real.project,'proj_offline_browser');assert.match(input.reasoning.real.budget_id,/^[0-9a-f-]{36}$/);
+  assert(Date.parse(input.reasoning.real.expires_at)>Date.now()+9*60000);
+  assert(Date.parse(input.reasoning.real.expires_at)<=Date.parse(task.created_at)+10*60000);
+  assert.equal(input.reasoning.max_cost_microusd,378);assert.equal(input.reasoning.max_requests,1);assert.deepEqual(input.reasoning.external_tools,[]);
+  const pending=page.locator('#task-list article').filter({has:page.getByRole('heading',{name:input.task,exact:true})});await pending.getByText('Status: pending',{exact:false}).waitFor();
+  assert.equal(await pending.getByRole('button',{name:'Approve execution',exact:true}).isEnabled(),false);
+  const submitted=JSON.parse(response.request().postData());
+  assert.equal(input.task,'Phase8 offline '+nonce+' '+label);assert.equal(input.desired_outcome,'recovered');assert.equal(input.material,'Synthetic service recovered after a test restart. Cause remains unverified.');
+  assert.equal(input.reasoning.model,'gpt-6-luna');assert.equal(input.reasoning.max_input_tokens,2000);assert.equal(input.reasoning.max_output_tokens,256);
+  const duplicate=await context.request.post(origin+'/api/factory/agents/'+agent.agent_id+'/tasks',{headers:{Origin:origin},data:submitted});assert.equal(duplicate.status(),200);assert.deepEqual(await duplicate.json(),task,'idempotent submission cannot create a duplicate');
+  const unique=await(await context.request.get(origin+'/api/factory/agents/'+agent.agent_id+'/tasks')).json();assert.equal(unique.tasks.length,1);
+  const unconfirmed=await context.request.post(origin+'/api/factory/tasks/'+task.id+'/command',{headers:{Origin:origin},data:{request_id:randomUUID(),operation:'approve',expected_revision:task.revision,input_sha256:task.input_sha256,confirmed:false}});assert.equal(unconfirmed.status(),400,'unchecked approval rejected by command validation');
+  const unchanged=await(await context.request.get(origin+'/api/factory/tasks/'+task.id)).json();assert.deepEqual(unchanged,task,'denied approval leaves task and reservation unchanged');
+  const scope=await pending.innerText();for(const expected of [input.task,task.input_sha256,'gpt-6-luna','$0.000378','Maximum input: 2,000','Maximum output: 256','Requests: 1 / no retries or tools','proj_offline_browser',input.reasoning.real.expires_at])assert(scope.includes(expected),'scope missing: '+expected);
+  async function act(name,state,confirm=false){stage=label+'_'+name.replaceAll(' ','_');if(confirm)await pending.getByLabel(name==='Accept reviewed result and complete'?'I reviewed this model result and its uncertainty.':'I approve this exact synthetic task').check();const saved=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/factory/tasks/'+task.id+'/command'&&r.request().method()==='POST');await pending.getByRole('button',{name,exact:true}).click();assert.equal((await saved).status(),200,stage+' HTTP status');await pending.getByText('Status: '+state,{exact:false}).waitFor();}
+  await act('Approve execution','approved',true);await page.reload({waitUntil:'domcontentloaded'});await pending.getByText('Status: approved',{exact:false}).waitFor();
+  const approved=await(await context.request.get(origin+'/api/factory/tasks/'+task.id)).json();assert.equal(approved.input_sha256,task.input_sha256);assert.equal(approved.inference,null);
+  stage=label+'_spending';
+  await pending.getByText('Spending consent: not authorized',{exact:true}).waitFor();
+  const spendingButton=pending.getByRole('button',{name:'Authorize spending for this task',exact:true});assert.equal(await spendingButton.isEnabled(),false);
+  await pending.getByLabel('I separately authorize up to $0.000378 for this exact task.',{exact:true}).check();
+  const savedConsent=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/factory/tasks/'+task.id+'/spending-consent'&&r.request().method()==='POST');
+  await spendingButton.click();const consentResponse=await savedConsent;assert.equal(consentResponse.status(),200);const consent=await consentResponse.json();assert.equal(consent.consent.state,'authorized');assert.equal(consent.consent.max_cost_microusd,378);assert(!JSON.stringify(consent).includes('receipt'));
+  await pending.getByText(/Spending consent: authorized/).waitFor();
+  await page.reload({waitUntil:'domcontentloaded'});await pending.getByText(/Spending consent: authorized/).waitFor();
+  const duplicateConsent=await context.request.post(origin+'/api/factory/tasks/'+task.id+'/spending-consent',{headers:{Origin:origin},data:{...JSON.parse(consentResponse.request().postData()),request_id:randomUUID()}});assert.equal(duplicateConsent.status(),403);
+  await act('Start approved task','running',true);await act('Run next step','running');await pending.getByText(/step 1 of 3/).waitFor();
+  await act('Run next step','awaiting_review');assert.equal(await pending.getByRole('heading',{name:'Retained private memory',exact:true}).count(),0);assert((await pending.innerText()).includes('No memory has been retained'));
+  await act('Accept reviewed result and complete','completed',true);await page.reload({waitUntil:'domcontentloaded'});await pending.getByText('Status: completed',{exact:false}).waitFor();
+  const result=await(await context.request.get(origin+'/api/factory/tasks/'+task.id)).json();assert.equal(result.input_sha256,task.input_sha256);assert.equal(result.step,3);assert.equal(result.inference.state,'settled');assert.equal(result.inference.reserved_microusd,378);assert.equal(result.inference.actual_microusd,80);assert.equal(result.inference.usage.input_tokens,300);assert.equal(result.inference.usage.output_tokens,100);assert.equal(result.payloads[1].inference_attempts,1);assert.equal(result.payloads[2].memory.source_result_sha256,result.inference.result_sha256);assert.equal(result.payloads[2].memory.source_task_id,task.id);assert(result.events.length>=6);
+  const final=await pending.innerText();assert(final.includes('Audit history'));assert(final.includes('Hypothesis /'));assert(final.includes('$0.000080 observed cost'));assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:resolve(out,label+'-mock-backed-real-plan.png'),fullPage:true});
+  stage=label+'_isolation';await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.waitForURL(origin+'/sign-in');await page.getByLabel('Synthetic account').fill('other');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign In',exact:true}).click();await page.waitForURL(origin+'/factory/create');assert.equal((await context.request.get(origin+'/api/factory/tasks/'+task.id)).status(),403);assert.equal((await context.request.get(origin+'/api/factory/agents/'+agent.agent_id+'/tasks')).status(),403);assert.equal((await context.request.get(origin+'/api/factory/tasks/'+task.id+'/spending-consent')).status(),403);
+  report.contexts.push({viewport:label,real_plan_prepared_via_website:true,scoped_locator_collision_regression:true,duplicate_preparation_idempotent:true,unconfirmed_approval_denied:true,production_generation_without_receipt_denied:true,exact_input_approved_in_ui:true,separate_durable_spending_consent:true,consent_refresh_persistence:true,duplicate_consent_denied:true,approval_persisted:true,mock_execution_completed:true,simulated_preflights:2,simulated_generations:1,budget_microusd:378,input_token_ceiling:2000,output_token_ceiling:256,observed_synthetic_cost_microusd:80,simulated_result_cost_and_private_memory_verified:true,owner_isolation:true,agent_id:agent.agent_id,task_id:task.id,input_sha256:task.input_sha256});await context.close();
+ }
+ assert.equal(report.external_requests,0);assert.equal(serverError,false);report.passed=true;
+}catch(e){report.stage=stage;report.error_class=e.name;report.actual=e.actual;report.expected=e.expected;report.assertion=String(e.message).split('\n')[0].slice(0,180);process.exitCode=1;}
+finally{await browser?.close();server.closeAllConnections();await new Promise(ok=>server.close(ok));await modules.cleanup();process.chdir(root);await writeFile(resolve(out,'browser-result.json'),JSON.stringify(report,null,2)+'\n',{mode:0o600});console.log(JSON.stringify(report));}
